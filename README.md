@@ -10,6 +10,7 @@ architecture code in `vendor/`. **49 regression tests**, and every performance
 number in the documentation comes from a script in this repository.
 
 ```sh
+k2mlx                                         # pick a model interactively and serve it
 k2mlx doctor                                   # environment, dependencies, disk, Hub mirror
 k2mlx models                                   # profiles, sizes, what is downloaded
 k2mlx download qwen3.6-35b-a3b                 # mirror-aware weight download

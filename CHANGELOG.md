@@ -4,6 +4,39 @@ Versions are the engine's own; the pinned runtime versions it is built against a
 in `requirements.lock`. Every number quoted here was measured on an M2 Ultra with
 64 GiB and is reproducible with the `check_*.py` script named beside it.
 
+## 1.3.0
+
+An interactive selector, and the fixes a final review turned up.
+
+### Choosing a model
+
+- `k2mlx` with no arguments, or `k2mlx pick`, shows every profile with the context
+  it can hold in this machine's free memory once its weights are resident, and its
+  measured decode and prefill rates. Arrow keys or j/k move, enter serves, r
+  re-reads memory, q quits; without a terminal it prints the table and reads a
+  number, so it works in a script too.
+- The context column uses the same `ContextPolicy` the server uses at request
+  time, with the weights discounted from available memory - which is why Gemma 4
+  31B reads 110k of its 262k window and K2-Horizon 298k of 524k.
+- Speeds are measurements from this machine, marked as such; profiles not measured
+  here fall back to a bandwidth model calibrated on the ones that were.
+
+### Fixed by a final end-to-end review
+
+- MTP replies corrupted any multi-byte character (CJK, emoji), emitted the
+  end-of-turn marker into content, filed the prompt cache under tokens it did not
+  cover, and lost the last characters of normalised replies. All four are fixed
+  and verified against the same prompts that exposed them.
+- Gemma 4 26B-A4B stopped loading: the text-tower adapter stripped
+  `language_model.` from the weights but not from the per-module quantization map,
+  so its 8-bit router was quantized at 4 bits.
+- GPT-OSS, Muse Glimmer, Spark2.5 and GLM-4.7-Flash crashed with the default
+  command, because sliding-window and MLA caches cannot take quantized KV. They
+  are declared unquantized; every earlier check had passed `--kv-bits 0`, which is
+  how a default-path bug hides.
+- `k2mlx context --restore` crashed on every run, the first download through a
+  mirror crashed, and `--dry-run` raised instead of reporting a blocked extension.
+
 ## 1.2.0
 
 Spark2.5 runs, and context extension has a verified map.

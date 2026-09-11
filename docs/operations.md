@@ -16,6 +16,39 @@ been measured against; the versions in `pyproject.toml` are looser bounds for
 people installing from a package index. `k2mlx doctor` reports both, and flags any
 drift.
 
+## Choosing a model
+
+`k2mlx` with no arguments, or `k2mlx pick`, shows every profile with the two
+numbers that decide the choice on a specific machine - the context it can hold
+once its weights are resident, and how fast it generates - and serves the one you
+select. Arrow keys or `j`/`k` move, enter serves, `r` re-reads memory, `q` quits.
+
+```
+k2mlx model selector   memory 47 of 64 GiB free   keys up/down move, enter serve, r refresh, q quit
+
+  model                   weights       kind  ctx (here)   native   decode   prefill
+> k2-horizon                 19.6    MoE 100        298k     524k       47      1153   measured
+  gemma4-26b-a4b             14.3    MoE 128        262k     262k      192         -   measured
+  gemma4-31b                 17.1      dense        110k     262k       23      4752   measured
+  nemotron-3.5-30b-a3b       16.6    MoE 128        524k     524k       86      1136   measured
+  spark-x2.5-4b               7.7      dense          1M       1M       55      1300   measured
+```
+
+**ctx (here)** is not a config field. It is computed the way the server computes
+it at request time - the same `ContextPolicy`, the same available memory, the same
+device limit - with the checkpoint's weights subtracted, because they will be
+resident once it is serving. That is why Gemma 4 31B shows 110k of its 262k
+window, and why the number moves when something else on the machine takes memory.
+
+**decode** and **prefill** are measurements taken on this machine with the engine's
+own check scripts, marked `measured`; a `~` marks the bandwidth estimate used for a
+profile that has not been measured here, which is honest to about a third either
+way. `prefill` is blank where it has not been measured.
+
+`k2mlx pick --print` shows the same table and prints the command instead of
+serving. Without a terminal on stdin the table is printed and a number is read, so
+the selector also works in a script.
+
 ## Quick start
 
 ```sh
