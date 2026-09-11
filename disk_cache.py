@@ -120,12 +120,15 @@ class DiskPromptCache:
                 if a != b:
                     break
                 common += 1
-            # Recurrent Gated DeltaNet states describe a precise checkpoint;
-            # rolling them back to an arbitrary common prefix is invalid.
-            if not entry.get('trimmable', True) and common != len(entry['tokens']):
+            # Every caller needs at least one token left to process - the batch
+            # generator raises on an empty prompt - so a match may never consume
+            # the whole query. A longer query still reuses the whole entry, which
+            # is the case that matters for a conversation.
+            prefix = min(common, len(tokens) - 1)
+            if not entry.get('trimmable', True) and prefix != len(entry['tokens']):
                 continue
-            if common > best_prefix:
-                best_key, best_prefix = key, common
+            if prefix > best_prefix:
+                best_key, best_prefix = key, prefix
         if best_key is None:
             self.misses += 1
             return None, tokens
