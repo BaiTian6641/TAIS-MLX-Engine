@@ -71,6 +71,12 @@ def cmd_serve(args):
     forwarded = list(args.engine_args)
     if forwarded and forwarded[0] == '--':
         forwarded = forwarded[1:]
+    if not any(item == '--model' or item.startswith('--model=') for item in forwarded):
+        # No model named: let the user choose from what this machine can hold.
+        import console
+        if args.detach:
+            raise SystemExit('the selector runs in the foreground; drop --detach')
+        return console.main([])
     if args.detach:
         return spawned([str(ROOT / 'start_server.py'), *forwarded])
     run('serve.py', forwarded)
@@ -257,6 +263,19 @@ def cmd_bench(args):
     return spawned([str(ROOT / script), *argv])
 
 
+def cmd_pick(args):
+    import console
+
+    argv = ['--print'] if args.dry_run else []
+    for flag, value in (('--hf-endpoint', args.hf_endpoint), ('--hf-token', args.hf_token),
+                        ('--hf-home', args.hf_home)):
+        if value:
+            argv += [flag, value]
+    if args.hf_offline:
+        argv.append('--hf-offline')
+    return console.main(argv)
+
+
 def cmd_version(args):
     from version import __version__
     print(f'k2mlx {__version__}')
@@ -269,7 +288,8 @@ def build_parser():
         description='MLX inference engine for Apple silicon: dense, MoE, block-diffusion '
                     'and streaming-expert models.',
         epilog=f'scripts live in {ROOT}; engine options after `serve` are passed through '
-               'unchanged (see `k2mlx serve --model <name> --help`).')
+               'unchanged. Run `k2mlx serve` with no --model and it offers a selection '
+               'with each profile\'s context and speed on this machine.')
     from version import __version__
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     sub = parser.add_subparsers(dest='command', required=True)
@@ -326,6 +346,17 @@ def build_parser():
     bench.add_argument('--label', help='label for `bench optimizations`')
     bench.add_argument('--lengths', help='comma-separated context lengths for `bench context`')
     bench.set_defaults(func=cmd_bench)
+
+    pick = sub.add_parser('pick', help='choose a model interactively and serve it',
+                          description='Shows every profile with the context it can hold in '
+                                      "this machine's free memory and its measured or estimated "
+                                      'speed, then serves the one you choose. `--print` shows '
+                                      'the table and the command without serving.')
+    pick.add_argument('--print', action='store_true', dest='dry_run',
+                      help='print the table and the equivalent command, serve nothing')
+    import hf_env as _hf_env
+    _hf_env.add_arguments(pick)
+    pick.set_defaults(func=cmd_pick)
 
     version = sub.add_parser('version', help='print the engine version')
     version.set_defaults(func=cmd_version)
