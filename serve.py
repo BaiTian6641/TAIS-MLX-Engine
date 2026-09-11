@@ -1,7 +1,6 @@
 """K2 deployment with adaptive context, SSD prompt caching, and live telemetry."""
 import copy
 import dataclasses
-import hashlib
 import json
 import logging
 import os
@@ -11,7 +10,9 @@ import time
 import gc
 
 ROOT = Path(__file__).resolve().parent
-os.environ.setdefault('HF_HOME', str(ROOT / 'hf-cache'))
+import hf_env  # noqa: E402  (before anything that imports huggingface_hub)
+
+hf_env.configure(root=ROOT)
 import mlx.core as mx
 from mlx_lm import server, tokenizer_utils
 from disk_cache import DiskPromptCache
@@ -32,8 +33,6 @@ METRICS.extra['model'] = MODEL_ALIAS
 FINGERPRINT = fingerprint(MODEL_PATH)
 EXPERT_CACHE = None
 EMBEDDING_CACHE = None
-# id(prompt cache) -> (prompt tokens, cache as it was when prefill finished)
-SNAPSHOTS = {}
 
 
 def offload_stats():
@@ -174,75 +173,15 @@ def load_local(self, model_path, adapter_path=None, draft_model_path=None):
 
 
 server.ModelProvider.load = load_local
-def install_prefill_snapshots():
-    """Store each prompt cache as it was when its prefill finished.
-
-    ``insert_cache`` is called once generation is done, so what it stores is the
-    prompt *plus* the tokens the model went on to produce. The next chat turn
-    re-renders the conversation and does not continue those tokens, so it is not
-    an extension of that entry and - on a hybrid model, whose caches cannot be
-    trimmed back to the common prefix - it finds nothing to reuse at all.
-
-    It is an extension of the pre-generation cache. Snapshotting at the moment
-    prefill completes (the progress callback's last call) gives an entry keyed by
-    the prompt alone, which every later turn extends.
-    """
-    if getattr(server.stream_generate, '_snapshot_hook', False):
-        return
-    snapshots = SNAPSHOTS
-    upstream = server.stream_generate
-
-    def stream_generate(*args, **kwargs):
-        cache = kwargs.get('prompt_cache')
-        prompt = kwargs.get('prompt')
-        progress = kwargs.get('prompt_progress_callback')
-
-        def snapshot_progress(done, total):
-            if cache is not None and prompt is not None and done >= total:
-                # One prefill runs at a time in this thread, so a single slot is
-                # enough - and unlike an id-keyed table it cannot be matched by
-                # a later cache that happens to reuse a freed object's address.
-                snapshots['pending'] = (list(prompt), copy.deepcopy(cache))
-            progress and progress(done, total)
-
-        kwargs['prompt_progress_callback'] = snapshot_progress
-        yield from upstream(*args, **kwargs)
-
-    stream_generate._snapshot_hook = True
-    server.stream_generate = stream_generate
-
-
-def snapshot_aware_insert(prompt_cache):
-    """Wrap a prompt cache so the prefill snapshot is stored alongside the result."""
-    original_insert = prompt_cache.insert_cache
-
-    def insert_cache(model, tokens, prompt_cache_arg, **kwargs):
-        original_insert(model, tokens, prompt_cache_arg, **kwargs)
-        entry = SNAPSHOTS.pop('pending', None)
-        if entry is None:
-            return
-        prompt_tokens, snapshot = entry
-        # Only claim the snapshot if it really describes this prompt; the slot is
-        # shared by every request this process serves.
-        if len(prompt_tokens) <= len(tokens) and list(tokens[:len(prompt_tokens)]) == prompt_tokens:
-            original_insert(model, prompt_tokens, snapshot, **kwargs)
-            logging.info('prompt cache: stored a prefill snapshot for %d tokens',
-                         len(prompt_tokens))
-
-    prompt_cache.insert_cache = insert_cache
-    return prompt_cache
-
-
 original_init = server.ResponseGenerator.__init__
 
 
 def generator_init(self, provider, prompt_cache):
-    install_prefill_snapshots()
     if OPTIONS.mtp_draft is not None:
         # MTP keeps prompt caches in memory: the disk cache restores mlx_lm's
         # own cache classes, and the vendored linear-attention layers reject
         # them (`ArraysCache` has no `update_window`).
-        original_init(self, provider, snapshot_aware_insert(prompt_cache))
+        original_init(self, provider, prompt_cache)
         return
     codec = None
     if PROFILE.get('flash'):
@@ -251,12 +190,18 @@ def generator_init(self, provider, prompt_cache):
                           int(float(os.environ.get('K2_SSD_CACHE_GIB', '64')) * 2**30), codec=codec)
     with METRICS.lock:
         METRICS.extra.update(disk_entries=len(disk), disk_bytes=disk.disk_bytes)
-    original_init(self, provider, snapshot_aware_insert(disk))
+    original_init(self, provider, disk)
 
 
 server.ResponseGenerator.__init__ = generator_init
 original_single = server.ResponseGenerator._serve_single
 SPECULATIVE = {'model': None, 'drafter': None}
+
+
+def cache_coverage(caches):
+    """Tokens the caches hold, when every cache that tracks an offset agrees."""
+    offsets = {c.offset for c in caches if hasattr(c, 'offset')}
+    return offsets.pop() if len(offsets) == 1 else None
 
 
 def install_mtp(drafter_path):
@@ -335,26 +280,54 @@ def install_mtp(drafter_path):
             cache_key = prompt[:]
             stop_matcher = stop_sequences.matcher()
             greedy = getattr(args, 'temp', 1.0) == 0
+            # End of turn for these templates is a special token that is not
+            # always in the tokenizer's eos list, and the ordinary path strips it
+            # through the text state machine, which this path does not run.
             eos_ids = set(getattr(tokenizer, 'eos_token_ids', None) or [])
             if not eos_ids and getattr(tokenizer, 'eos_token_id', None) is not None:
                 eos_ids = {tokenizer.eos_token_id}
+            eos_ids |= set(getattr(tokenizer, 'all_special_ids', None) or [])
             emitted, text = 0, ''
+            # Tokens are decoded through the tokenizer's own detokenizer: a
+            # character whose bytes span several tokens decodes to replacement
+            # characters if each token is decoded on its own.
+            detokenizer = tokenizer.detokenizer
+            detokenizer.reset()
             stream_state = mtp_speculation.stream_speculative(
                 model, SPECULATIVE['drafter'], cache, prompt_ids,
                 args.max_tokens, sampler, greedy=greedy, eos_token_ids=eos_ids,
             )
+            finish = 'length'
             for token, _ in stream_state:
+                # Checked before the detokenizer sees it: the end-of-turn token
+                # is a special token, and adding it first would emit its marker
+                # into the reply.
+                if token in eos_ids:
+                    finish = 'stop'
+                    break
+                if stop_matcher.advance(token) or ctx._should_stop:
+                    finish = 'stop'
+                    break
                 emitted += 1
-                whole = tokenizer.decode([token], skip_special_tokens=True)
+                detokenizer.add_token(token)
+                whole = detokenizer.last_segment
                 text += whole
                 rqueue.put(server.Response(whole, token, 0.0, None, None))
-                cache_key.append(token)
-                if stop_matcher.advance(token) or ctx._should_stop:
-                    break
+            detokenizer.finalize()
+            tail = detokenizer.last_segment
+            if tail:
+                rqueue.put(server.Response(tail, token, 0.0, None, None))
             rounds = getattr(stream_state, 'rounds', 0)
             logging.info('MTP: emitted %d tokens over %d rounds (%.2f accepted per round)',
                          emitted, rounds, emitted / max(rounds, 1))
             rqueue.put(None)
+            # The round loop commits a whole accepted block to the cache before
+            # yielding it token by token, so the cache can hold more than this
+            # loop has emitted. The prompt cache is keyed by the tokens the cache
+            # actually covers, not by what has been sent to the client.
+            covered = cache_coverage(cache)
+            if covered is not None and covered < len(cache_key):
+                del cache_key[covered:]
             self.prompt_cache.insert_cache(self.model_provider.model_key, cache_key, cache)
         except Exception as exc:
             rqueue.put(exc)
@@ -388,6 +361,11 @@ def _normalised(responses, normaliser):
         if text != response.text:
             response = dataclasses.replace(response, text=text)
         yield response
+    # Markers straddle boundaries, so the transformer holds back a partial run.
+    # Without this flush the final characters of every normalised reply are lost.
+    tail = normaliser.feed('', final=True)
+    if tail:
+        yield dataclasses.replace(response, text=tail)
 
 
 server.ResponseGenerator.generate = generate
