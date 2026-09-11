@@ -24,6 +24,19 @@ PROFILES = {
                            'chat_template_args': {'enable_thinking': True}},
     'nemotron-3.5-30b-a3b': {'path': 'models/nemotron-3.5-30b-a3b', 'model_type': 'nemotron_h',
                              'chat_template_args': {}},
+    'gpt-oss-20b': {'path': 'models/gpt-oss-20b', 'model_type': 'gpt_oss',
+                    'chat_template_args': {'reasoning_effort': 'low'}},
+    'muse-glimmer-30b': {'path': 'models/muse-glimmer-30b', 'model_type': 'muse_glimmer',
+                         # The template addresses messages and expects a reasoning
+                         # strength; without it the model echoes raw template markers.
+                         'chat_template_args': {'reasoning_strength': 'low'}},
+    'glm-4.7-flash': {'path': 'models/glm-4.7-flash', 'model_type': 'glm4_moe_lite',
+                      # Thinking stays on: with it disabled this model answers
+                      # "5" to 2+2. The reply is still split into content and
+                      # reasoning, so callers see the answer field cleanly.
+                      'chat_template_args': {'enable_thinking': True}},
+    'minicpm5-2b': {'path': 'models/minicpm5-2b', 'model_type': 'llama',
+                    'chat_template_args': {}},
     'qwen3.5-9b': {'path': 'models/qwen3.5-9b', 'model_type': 'qwen3_5',
                    'chat_template_args': {'enable_thinking': True}},
     'qwen3.5-4b': {'path': 'models/qwen3.5-4b', 'model_type': 'qwen3_5',
