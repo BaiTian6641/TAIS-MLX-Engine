@@ -65,6 +65,12 @@ def extend(path, factor, original=None, max_position=None, force=False, dry_run=
     if existing and not force:
         if existing.get('rope_type') == 'yarn' and float(existing.get('factor', 0)) == float(factor):
             return {'changed': False, 'reason': 'already extended by this factor', 'scaling': existing}
+        if dry_run:
+            # A dry run reports what would happen; refusing to describe it is not
+            # useful, and the caller has changed nothing to undo.
+            return {'changed': False, 'dry_run': True, 'blocked_by': existing,
+                    'reason': 'the checkpoint already declares rope_scaling; a real run '
+                              'would refuse without force=True'}
         raise ValueError(f'{path.name} already declares rope_scaling {existing}; '
                          'pass force=True to replace it')
 

@@ -61,3 +61,14 @@ class ContextExtensionTest(unittest.TestCase):
         result = extend(self.path, 8, dry_run=True)
         self.assertEqual(result['new_max'], 131072 * 8)
         self.assertEqual((self.path / 'config.json').read_text(), self.original)
+
+    def test_dry_run_reports_a_blocked_extension_instead_of_raising(self):
+        """A dry run describes what a real run would do; it has nothing to undo."""
+        (self.path / 'config.json').write_text(json.dumps({
+            'max_position_embeddings': 131072,
+            'rope_scaling': {'rope_type': 'linear', 'factor': 2}}) + '\n')
+        result = extend(self.path, 4, dry_run=True)
+        self.assertFalse(result['changed'])
+        self.assertIn('blocked_by', result)
+        self.assertEqual((self.path / 'config.json').read_text(),
+                         (self.path / 'config.json').read_text())
