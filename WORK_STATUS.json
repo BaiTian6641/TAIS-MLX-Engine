@@ -1,0 +1,38 @@
+{
+  "saved_at": "2026-09-10T15:10:00.000000+00:00",
+  "downloads": "Both Unsloth UD-IQ1_S GGUFs complete (144.4 GiB) under gguf/, pinned by model-configs/*.gguf.lock.json. MLX 4-bit partials retained but superseded for the two Flash profiles.",
+  "servers": "Stopped; ports 8080, 8081 and 8082 verified unused.",
+  "implemented": [
+    "DiffusionGemma block-diffusion generation (vendored model + entropy-bound sampler in diffusion_engine.py)",
+    "Pinned IQ1 GGUF downloader (setup_gguf.py) with revision locks",
+    "MLX device decoders for IQ1_S, IQ1_M, IQ2_XXS, IQ3_XXS, IQ4_NL and MXFP4, bit-exact against the gguf reference",
+    "Single-dispatch Metal dequant kernels for the five expert formats (iq_metal.py)",
+    "Fused gate/up expert banks: two gathers per selection instead of three",
+    "deepseek4 and qwen4exp GGUF-to-MLX loaders with streaming routed experts over an undecoded hot set",
+    "Row-streamed GGUF n-gram (PLE) table so Qwen's 26.8 GiB table is never decoded into memory",
+    "Gemma 4 text profile (26B-A4B) served through the pinned mlx_lm gemma4_text implementation",
+    "GGUF-vs-MLX tensor parity checker (check_gguf_parity.py)",
+    "Context-scaling probe measuring prefill and decode against prompt length",
+    "Tracked reference bibliography of the optimization methods used or evaluated (docs/references.md)"
+  ],
+  "validated": [
+    "chat-turn prefix reuse is blocked by prompt rendering, and it is now measured rather than assumed: the second turn of a Qwen3.5-9B conversation shares 1215 of the first turn's 1219 prompt tokens, diverging at the assistant generation marker, so a rendered conversation is not a token prefix of its own next turn - matching vLLM's production figure of a 1.7% hit rate across 610 agentic traces",
+    "the prompt cache now stores a snapshot taken at prefill completion under the prompt alone, and entries whose offset reaches the end of their token list are marked complete so exact repeats match on the final token - an off-by-one that previously limited reuse to the trimming path",
+    "49 regression tests passed",
+    "the serving flags are now checked against the loaded model instead of being trusted from a table: cache_capabilities() probes the real caches (mirroring what maybe_quantize_kv_cache and the batch check actually do) and serve.py fails fast on disagreement, so the rotating-cache case that would take the server down mid-request is refused at startup and a --kv-bits flag that cannot do anything warns instead of passing silently",
+    "nemotron_h added to the unquantized-KV set: its caches hold recurrent state only, so the flag was a no-op",
+    "MTP serving: 94.4-96.5 tok/s against 59.2 unspeculated over HTTP on the same prompt (1.59x), byte-identical output, 2.91 tokens accepted per target forward logged per request",
+    "MTP mode keeps prompt caches in memory and drafts from a partially cached prefix; the disk cache restores mlx_lm cache classes that the vendored linear-attention layers reject",
+    "prompt-prefix reuse is characterised exactly: an exact repeat hits for every model (97x at 32k on Qwen3.5-9B, 153x on Nemotron) and a strict extension hits, but a chat turn usually hits neither because the stored entry is not a prefix of the next turn's rendering and trimming back to the common prefix needs trim_prompt_cache, which hybrid caches refuse",
+    "MTP in-loop: lossless at every block size, 1.20x on Qwen3.6-35B-A3B and 1.21x on Ornith at the shipped block 3",
+    "block drafters still lose on this target (DFlash 0.55-0.59x, DSpark 0.44-0.97x) while MTP wins - round cost scales with drafting layers times verify width",
+    "batching gives 1.42-1.88x aggregate decode across SmolLM3-3B, Gemma 4 26B-A4B/31B, Qwen3.6-35B-A3B and Nemotron; a 198k-token prefill completes at --prefill-step-size 64 where the default is killed by the Metal command-buffer watchdog"
+  ],
+  "pending": [
+    "chat-turn prefix reuse is blocked by the same cache-trimmability limit that blocked speculation; only exact repeats and strict extensions reuse today",
+    "MTP over the batch generator (concurrent requests) is not wired: the vendored caches are not mergeable",
+    "Llama-3.2-3B does not save a completed prefix checkpoint",
+    "long-prompt prefill costs 14x per token above ~2k, upstream's own behaviour"
+  ],
+  "inference_backend": "MLX only; no llama.cpp inference backend installed."
+}
