@@ -110,9 +110,13 @@ def normalise(text, split_reasoning=True):
     return ChannelNormaliser(split_reasoning).feed(text, final=True)
 
 
-def needs_normalising(tokenizer):
-    """Whether this model's output carries a channel envelope worth rewriting."""
-    return bool(getattr(tokenizer, 'has_thinking', False)) or _addressed(tokenizer)
+def addressed(tokenizer):
+    """Only models whose templates address channels need the rewrite.
+
+    Gating on ``has_thinking`` as well would mangle models that never emit an
+    envelope but do quote one: a literal ``to=self<|message|>`` in the text of a
+    thinking model would be rewritten into a thinking marker.
+    """
 
 
 def _addressed(tokenizer):
