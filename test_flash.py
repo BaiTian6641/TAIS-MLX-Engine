@@ -163,3 +163,43 @@ class FlashTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class QuantizationKeyTest(unittest.TestCase):
+    """The text-tower adapter must keep the checkpoint's per-module quantization map."""
+
+    def test_keys_are_stripped_for_the_load_and_restored_after(self):
+        import json
+        from pathlib import Path
+        import tempfile
+
+        from flash_models import quantization_keys_for_text_tower
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            original = {'model_type': 'gemma4',
+                        'quantization': {'group_size': 64, 'bits': 4,
+                                         'language_model.model.layers.0.route': {'bits': 8}},
+                        'quantization_config': {'language_model.model.layers.0.route': {'bits': 8}}}
+            config_path = path / 'config.json'
+            config_path.write_text(json.dumps(original))
+            with quantization_keys_for_text_tower(path):
+                inside = json.loads(config_path.read_text())
+                self.assertIn('model.layers.0.route', inside['quantization'])
+                self.assertNotIn('language_model.model.layers.0.route', inside['quantization'])
+                self.assertIn('model.layers.0.route', inside['quantization_config'])
+            self.assertEqual(json.loads(config_path.read_text()), original)
+
+    def test_a_config_without_the_prefix_is_left_alone(self):
+        import json
+        from pathlib import Path
+        import tempfile
+
+        from flash_models import quantization_keys_for_text_tower
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            config = {'quantization': {'bits': 4, 'model.layers.0.route': {'bits': 8}}}
+            (path / 'config.json').write_text(json.dumps(config))
+            with quantization_keys_for_text_tower(path):
+                self.assertEqual(json.loads((path / 'config.json').read_text()), config)

@@ -1,6 +1,40 @@
 """Text adapters for pinned Flash architectures; no remote model code execution."""
+import contextlib
 import json
 from pathlib import Path
+
+
+@contextlib.contextmanager
+def quantization_keys_for_text_tower(path):
+    """Load a vision-plus-text checkpoint as its text tower alone.
+
+    The adapter strips the ``language_model.`` prefix from the weights, and the
+    pointed runtime applies the checkpoint's per-module quantization map against
+    the model's own parameter paths. Those keys carry the same prefix, so unless
+    they are stripped too the map silently misses and every tensor is quantized
+    at the blanket width - which fails outright on the parts the checkpoint
+    stores wider, such as Gemma 4's router, at 8 bits against the 4-bit default.
+    """
+    path = Path(path)
+    config_path = path / 'config.json'
+    original = config_path.read_text()
+    config = json.loads(original)
+    quantization = config.get('quantization') or {}
+    rewritten = {key[len('language_model.'):] if key.startswith('language_model.') else key: value
+                 for key, value in quantization.items()}
+    if rewritten == quantization:
+        yield
+        return
+    config['quantization'] = rewritten
+    if isinstance(config.get('quantization_config'), dict):
+        config['quantization_config'] = {
+            key[len('language_model.'):] if key.startswith('language_model.') else key: value
+            for key, value in config['quantization_config'].items()}
+    config_path.write_text(json.dumps(config, indent=2) + '\n')
+    try:
+        yield
+    finally:
+        config_path.write_text(original)
 
 
 def _gemma4_classes(config):
@@ -108,6 +142,8 @@ def register():
         config = json.loads((Path(path) / 'config.json').read_text())
         if config.get('model_type') in ('qwen4_exp', 'deepseek_v4', 'gemma4', 'spark2_5'):
             kwargs['get_model_classes'] = model_classes
+            with quantization_keys_for_text_tower(path):
+                return original(path, *args, **kwargs)
         return original(path, *args, **kwargs)
 
     load_model._flash_adapter = True
