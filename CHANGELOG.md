@@ -4,6 +4,59 @@ Versions are the engine's own; the pinned runtime versions it is built against a
 in `requirements.lock`. Every number quoted here was measured on an M2 Ultra with
 64 GiB and is reproducible with the `check_*.py` script named beside it.
 
+## 1.2.0
+
+Spark2.5 runs, and context extension has a verified map.
+
+### Spark2.5
+
+- `spark2_5` is ported from the checkpoint's own modelling code into
+  `vendor/spark2_5/`, because the architecture is in neither the pinned runtime
+  nor any of its relatives: it is **dense** where the nearest candidate is
+  mixture-of-experts, its attention carries a **per-head output gate**, its QKV is
+  **fused into one projection**, and it uses **two rotary embeddings** - a quarter
+  of the head dimensions at theta 5M for full layers, all of them at theta 10k for
+  sliding ones. 55.3 tok/s at bf16, 1,048,576 native context, verified serving.
+- One integration trap, found by serving it: transformers' generic RoPE validator
+  rejects the checkpoint's nested per-layer-type `rope_parameters`, so loading the
+  tokenizer raised before the model was ever built. The key is namespaced in the
+  local copy and the port reads either name.
+- The port is pinned by tests that do not need the checkpoint: incremental decoding
+  through the caches must equal one forward over the whole sequence, which covers
+  rotary offsets, the sliding/full mask split and cache handling at once.
+
+### Context extension, verified per profile
+
+Every profile was extended and then **served**, because a config change that
+returns the right number can still hang the model:
+
+| works | from → to |
+|---|---|
+| `minicpm5-2b` | 131,072 → 262,144 |
+| `smollm3-3b` | 65,536 → 262,144 |
+| `llama-3.2-3b` | 131,072 → 262,144 (replacing its llama3 scaling) |
+| `gpt-oss-20b` | 4,096 → 262,144 |
+| `glm-4.7-flash` | 202,752 → 405,504 |
+| `nemotron-3.5-30b-a3b` | 262,144 → **524,288** |
+
+| hangs, and was restored | why |
+|---|---|
+| `qwen3.5-9b`, `qwen3.6-35b-a3b`, `ornith-1.5-35b-a3b`, `qwen3.8-27b` | hybrid linear attention |
+| `muse-glimmer-30b` | full layers carry no positional embedding |
+| `gemma4-26b-a4b`, `gemma4-31b` | sliding-window layers with a rotating cache |
+
+The Qwen3.5 series, Ornith and Gemma 4 are already at 262,144, and Spark at
+1,048,576, so the refusals cost nothing that was not already there.
+
+### Architecture audit
+
+The four previously added models were audited against their reference
+implementations and their checkpoints' tensor headers: Muse Glimmer and MiniCPM5
+match, GPT-OSS matches apart from YaRN's `truncate` flag being ignored by the
+pinned runtime, and GLM-4.7-Flash carries three small differences (MLA norm
+epsilon 1e-5 against the reference's 1e-6, a bf16 rather than fp32 router matmul,
+and the same `truncate` divergence).
+
 ## 1.1.0
 
 Four more models, native context extension, and output channels.

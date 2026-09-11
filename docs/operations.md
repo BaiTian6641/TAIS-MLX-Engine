@@ -128,6 +128,7 @@ below are from `docs/decoding-and-memory.md`, on an M2 Ultra with 64 GiB.
 | `glm-4.7-flash` | 15.7 GiB | 48.2 tok/s | 64-expert MoE; keep thinking enabled, it answers worse without |
 | `gpt-oss-20b` | 11.3 GiB | 82.5 tok/s | MXFP4 MoE, harmony channel output, YaRN from the vendor config |
 | `minicpm5-2b` | 1.4 GiB | 133.0 tok/s | dense, fastest in the table |
+| `spark-x2.5-4b` | 8.2 GiB | 55.3 tok/s | vendored runtime, bf16: fused QKV, per-head sigmoid gate, per-layer-type rope, 1,048,576 native |
 | `qwen3.8-flash`, `deepseek-v4-flash` | — | 11.9 / 3.3 tok/s | streamed IQ1 GGUF; large models that do not fit resident |
 
 Thinking models answer in the `reasoning` field and leave `content` empty until
@@ -155,11 +156,30 @@ Two caveats worth knowing before extending anything:
 - YaRN restores *usable* length, not the accuracy of the original window. Expect
   the trained range to be unaffected and quality to fall off with distance beyond
   it.
-- It is not universal. `muse-glimmer-30b` alternates sliding-window layers with
-  full-attention layers that carry **no** positional embedding at all, and its
-  extended configuration hangs the pinned runtime, so it stays at its native
-  131,072 - which is already the 128K it was trained for. `--restore` puts any
-  extension back.
+- It is not universal, and the pattern is architectural. Every profile was tried
+  and verified by serving a request afterwards; the ones that work have plain
+  (or MLA) attention, and the ones that fail have recurrent or hybrid state:
+
+  | Extended | From | To | |
+  |---|---:|---:|---|
+  | `minicpm5-2b` | 131,072 | 262,144 | verified |
+  | `smollm3-3b` | 65,536 | 262,144 | verified |
+  | `llama-3.2-3b` | 131,072 | 262,144 | verified (overrides its llama3 scaling) |
+  | `gpt-oss-20b` | 4,096 | 262,144 | verified (on the vendor's own factor-32) |
+  | `glm-4.7-flash` | 202,752 | 405,504 | verified (MLA attention) |
+  | `nemotron-3.5-30b-a3b` | 262,144 | 524,288 | verified (Mamba/MoE/attention hybrid) |
+  | `muse-glimmer-30b` | — | — | hangs: full layers carry no positional embedding |
+  | `qwen3.5-9b`, `qwen3.6-35b-a3b`, `ornith-1.5-35b-a3b`, `qwen3.8-27b` | — | — | hang: hybrid linear attention |
+  | `gemma4-26b-a4b`, `gemma4-31b` | — | — | hang: sliding-window layers with a rotating cache |
+  | `spark-x2.5-4b` | — | — | not needed: 1,048,576 native |
+
+  "Hangs" means the request never returns while the server stays up, which is why
+  the extension command keeps the original config and why every attempt above was
+  followed by a served request rather than a config check. `--restore` is the way
+  back and was exercised on real checkpoints.
+
+  The models that refuse are already at 262,144 or more, so nothing is lost: the
+  Qwen3.5 family and Nemotron are at 262,144 and Spark at 1,048,576 natively.
 
 ## Channel output
 

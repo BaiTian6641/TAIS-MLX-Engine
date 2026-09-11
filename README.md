@@ -61,6 +61,8 @@ behaviour and the evidence for it.
 | `glm-4.7-flash` | 15.7 GiB | 48.2 tok/s | 64-expert MoE, 405K extended |
 | `gpt-oss-20b` | 11.3 GiB | 82.5 tok/s | MXFP4 MoE, 262K extended, harmony output |
 | `minicpm5-2b` | 1.4 GiB | 133.0 tok/s | dense, 262K extended |
+| `spark-x2.5-4b` | 8.2 GiB | 55.3 tok/s | vendored `spark2_5` runtime, 1M native context |
+| `nemotron-3.5-30b-a3b` | 16.6 GiB | 86.2 tok/s | Mamba/MoE/attention hybrid, extended to 524K |
 | `qwen3.8-flash`, `deepseek-v4-flash` | streamed | 11.9 / 3.3 tok/s | IQ1 GGUF with expert streaming |
 
 GGUF weights can also be **imported** for MLX execution; the importer supports
