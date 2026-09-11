@@ -108,9 +108,16 @@ def read_key(fd):
     try:
         tty.setraw(fd)
         char = os.read(fd, 1)
+        if char == b'':
+            return None
         if char == b'\x1b':
             tail = os.read(fd, 2) if select_ready(fd) else b''
-            return {b'[A': 'up', b'[B': 'down'}.get(tail, 'escape')
+            # A bare escape quits; an arrow's tail means an arrow; anything else
+            # (a function key, a Home or Delete, or a tail that arrived late over
+            # a slow link) is ignored rather than treated as quit.
+            if tail == b'':
+                return 'escape'
+            return {b'[A': 'up', b'[B': 'down', b'OA': 'up', b'OB': 'down'}.get(tail, 'other')
         if char in (b'\r', b'\n'):
             return 'enter'
         return char.decode('utf-8', 'ignore')
@@ -124,7 +131,7 @@ def select_ready(fd, timeout=0.02):
     return bool(ready)
 
 
-def choose(rows, memory, costs_for, interactive=True, refresh=None):
+def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=None):
     """Return the chosen row, or None if the user quit."""
     width = shutil.get_terminal_size((100, 30)).columns
     cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
@@ -159,12 +166,17 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None):
             key = read_key(fd)
             if key is None or key in ('q', 'escape'):
                 return None
+            if key == 'other':
+                continue
             if key in ('up', 'k'):
                 cursor = (cursor - 1) % len(rows)
             elif key in ('down', 'j'):
                 cursor = (cursor + 1) % len(rows)
             elif key == 'r':
-                memory = refresh() if refresh else memory
+                if refresh:
+                    memory = refresh()
+                if recompute is not None:
+                    rows[:] = recompute()
             elif key == 'enter':
                 return rows[cursor]
     finally:
@@ -206,7 +218,8 @@ def main(argv=None):
     memory, _ = snapshot()
     rows = collect(PROFILES, resolve, memory, costs_for)
     chosen = choose(rows, memory, costs_for, interactive=sys.stdin.isatty(),
-                    refresh=lambda: snapshot()[0])
+                    refresh=lambda: snapshot()[0],
+                    recompute=lambda: collect(PROFILES, resolve, snapshot()[0], costs_for))
     if chosen is None:
         return 0
     if not chosen['available']:
