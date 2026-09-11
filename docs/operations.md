@@ -8,23 +8,23 @@ the failure modes this engine has actually hit.
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.lock      # exact versions the engine is tested against
-.venv/bin/pip install -e .                      # optional: the `k2mlx` command
+.venv/bin/pip install -e .                      # optional: the `tais` command
 ```
 
 `mlx` and `mlx-lm` in `requirements.lock` are pinned to revisions this engine has
 been measured against; the versions in `pyproject.toml` are looser bounds for
-people installing from a package index. `k2mlx doctor` reports both, and flags any
+people installing from a package index. `tais doctor` reports both, and flags any
 drift.
 
 ## Choosing a model
 
-`k2mlx` with no arguments, or `k2mlx pick`, shows every profile with the two
+`tais` with no arguments, or `tais pick`, shows every profile with the two
 numbers that decide the choice on a specific machine - the context it can hold
 once its weights are resident, and how fast it generates - and serves the one you
 select. Arrow keys or `j`/`k` move, enter serves, `r` re-reads memory, `q` quits.
 
 ```
-k2mlx model selector   memory 47 of 64 GiB free   keys up/down move, enter serve, r refresh, q quit
+tais model selector   memory 47 of 64 GiB free   keys up/down move, enter serve, r refresh, q quit
 
   model                   weights       kind  ctx (here)   native   decode   prefill
 > k2-horizon                 19.6    MoE 100        298k     524k       47      1153   measured
@@ -45,19 +45,19 @@ own check scripts, marked `measured`; a `~` marks the bandwidth estimate used fo
 profile that has not been measured here, which is honest to about a third either
 way. `prefill` is blank where it has not been measured.
 
-`k2mlx pick --print` shows the same table and prints the command instead of
+`tais pick --print` shows the same table and prints the command instead of
 serving. Without a terminal on stdin the table is printed and a number is read, so
 the selector also works in a script.
 
 ## Quick start
 
 ```sh
-k2mlx doctor                                    # environment, dependencies, disk, mirror
-k2mlx models                                    # which profiles have weights on disk
-k2mlx download qwen3.6-35b-a3b                  # fetch one (mirror-aware)
-k2mlx serve --model qwen3.6-35b-a3b --port 8081 --detach
-k2mlx bench api --model qwen3.6-35b-a3b --port 8081
-k2mlx stop
+tais doctor                                    # environment, dependencies, disk, mirror
+tais models                                    # which profiles have weights on disk
+tais download qwen3.6-35b-a3b                  # fetch one (mirror-aware)
+tais serve --model qwen3.6-35b-a3b --port 8081 --detach
+tais bench api --model qwen3.6-35b-a3b --port 8081
+tais stop
 ```
 
 Without the package install, every command has a script equivalent:
@@ -66,17 +66,17 @@ Without the package install, every command has a script equivalent:
 ## Command line
 
 ```
-k2mlx serve [--detach] --model <profile> [engine options]
-k2mlx stop [--timeout SECONDS]
-k2mlx models [--json]
-k2mlx download <profile>... [--metadata-only] [hub options]
-k2mlx doctor
-k2mlx bench <kind> --model <profile> [--port N] [...]
-k2mlx version
+tais serve [--detach] --model <profile> [engine options]
+tais stop [--timeout SECONDS]
+tais models [--json]
+tais download <profile>... [--metadata-only] [hub options]
+tais doctor
+tais bench <kind> --model <profile> [--port N] [...]
+tais version
 ```
 
 `serve` passes anything after `--model` straight to the engine, so
-`k2mlx serve --model ornith-1.5-35b-a3b --kv-bits 0 --decode-concurrency 4` is the
+`tais serve --model ornith-1.5-35b-a3b --kv-bits 0 --decode-concurrency 4` is the
 same as running `serve.py` with those flags. Without `--detach` the server runs in
 the foreground and logs to stdout, which is what a container wants; with
 `--detach` it writes `server.pid` and logs to `server.log`.
@@ -107,13 +107,13 @@ conventional variable:
 | offline mode | `--hf-offline` | `HF_HUB_OFFLINE=1` |
 
 ```sh
-k2mlx download qwen3.6-35b-a3b --hf-endpoint https://hf-mirror.com
-K2MLX_HF_ENDPOINT=https://hf-mirror.com k2mlx download gemma4-31b
-k2mlx download smollm3-3b --hf-offline        # serve from cache, never call out
+tais download qwen3.6-35b-a3b --hf-endpoint https://hf-mirror.com
+K2MLX_HF_ENDPOINT=https://hf-mirror.com tais download gemma4-31b
+tais download smollm3-3b --hf-offline        # serve from cache, never call out
 ```
 
 The endpoint is normalised to scheme and host, because a path pasted from a model
-page would otherwise be glued onto every request. `k2mlx doctor` prints the
+page would otherwise be glued onto every request. `tais doctor` prints the
 effective endpoint, whether a token is set, and the cache directory, so a
 deployment can record where its weights came from. Endpoints are also passed
 explicitly to `snapshot_download` and `HfApi`, not only through the environment.
@@ -148,7 +148,7 @@ recurrent state, where the flag would be a silent no-op.
 
 ## Models
 
-`k2mlx models` prints this table live, including download state; the measurements
+`tais models` prints this table live, including download state; the measurements
 below are from `docs/decoding-and-memory.md`, on an M2 Ultra with 64 GiB.
 
 | profile | resident | decode | notes |
@@ -177,13 +177,13 @@ they finish; raise `max_tokens` rather than assuming the model failed.
 ## Extending context
 
 A checkpoint trained at 128K usually tolerates more once its rotary embeddings are
-rescaled, which is what YaRN does. `k2mlx context` writes that scaling into the
+rescaled, which is what YaRN does. `tais context` writes that scaling into the
 config and raises the declared maximum:
 
 ```sh
-k2mlx context --model minicpm5-2b --factor 2 --dry-run   # 131,072 -> 262,144
-k2mlx context --model glm-4.7-flash --factor 2           # 202,752 -> 405,504
-k2mlx context --model minicpm5-2b --restore              # back to the original
+tais context --model minicpm5-2b --factor 2 --dry-run   # 131,072 -> 262,144
+tais context --model glm-4.7-flash --factor 2           # 202,752 -> 405,504
+tais context --model minicpm5-2b --restore              # back to the original
 ```
 
 The original config is kept as `config.json.pre-yarn`, and the command refuses to
@@ -240,7 +240,7 @@ a GPU command that ran too long. It happens on very long prefills at the default
 chunk size; a 198k-token prompt is killed outright. Lower it:
 
 ```sh
-k2mlx serve --model nemotron-3.5-30b-a3b --prefill-step-size 64
+tais serve --model nemotron-3.5-30b-a3b --prefill-step-size 64
 ```
 
 Measured: 198,027 tokens in 1,004.6 s at step 64.
@@ -255,7 +255,7 @@ prefix of its own next turn. This is measured in
 `docs/decoding-and-memory.md`, and it matches what vLLM reports in production.
 
 **A model refuses to load or behaves oddly after switching profiles.** Only one
-server at a time: `k2mlx stop`. The engine refuses to start when `server.pid`
+server at a time: `tais stop`. The engine refuses to start when `server.pid`
 names a live process.
 
 **Out of memory.** Admission control clips the context rather than the process.
@@ -278,6 +278,6 @@ names a live process.
 | `diffusion_engine.py` | DiffusionGemma block sampler |
 | `telemetry.py`, `monitor.py` | metrics and the console monitor |
 | `hf_env.py` | Hub endpoint, token and cache configuration |
-| `cli.py` | the `k2mlx` command surface |
+| `cli.py` | the `tais` command surface |
 | `check_*.py` | measurements; each writes the JSON its documentation cites |
 | `test_*.py` | regression tests; they skip when a checkpoint is absent |

@@ -1,10 +1,10 @@
-# Changelog
+# Changelog — TAIS MLX Engine
 
 Versions are the engine's own; the pinned runtime versions it is built against are
 in `requirements.lock`. Every number quoted here was measured on an M2 Ultra with
 64 GiB and is reproducible with the `check_*.py` script named beside it.
 
-## 1.3.0
+## 1.3.0 (TAIS MLX Engine)
 
 An interactive selector, and the fixes a final review turned up.
 

@@ -4,15 +4,15 @@ Every entry point that touches the Hub imports this first, because
 ``huggingface_hub`` reads ``HF_ENDPOINT`` when it builds request URLs and
 reading it late is the same as not setting it.
 
-Three things are configurable, each from a flag, then from a ``K2MLX_``
+Three things are configurable, each from a flag, then from a ``TAIS_``
 variable, then from the conventional Hugging Face variable:
 
 ===========================  =================================  ==========================
 Setting                      Preferred                          Also read
 ===========================  =================================  ==========================
-Mirror endpoint              ``K2MLX_HF_ENDPOINT``              ``HF_ENDPOINT``
-Access token                 ``K2MLX_HF_TOKEN``                 ``HF_TOKEN``
-Cache directory              ``K2MLX_HF_HOME``                  ``HF_HOME``
+Mirror endpoint              ``TAIS_HF_ENDPOINT``              ``HF_ENDPOINT``
+Access token                 ``TAIS_HF_TOKEN``                 ``HF_TOKEN``
+Cache directory              ``TAIS_HF_HOME``                  ``HF_HOME``
 ===========================  =================================  ==========================
 
 A mirror is any host that serves the Hub API, for example
@@ -55,9 +55,9 @@ def configure(*, endpoint=None, token=None, home=None, offline=False, root=None,
     callers can log so a run records where its weights came from.
     """
     root = Path(root or ROOT)
-    endpoint = normalise_endpoint(endpoint) or normalise_endpoint(_first('K2MLX_HF_ENDPOINT', 'HF_ENDPOINT'))
-    token = token or _first('K2MLX_HF_TOKEN', 'HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN')
-    home = home or _first('K2MLX_HF_HOME', 'HF_HOME') or str(root / 'hf-cache')
+    endpoint = normalise_endpoint(endpoint) or normalise_endpoint(_first('TAIS_HF_ENDPOINT', 'K2MLX_HF_ENDPOINT', 'HF_ENDPOINT'))
+    token = token or _first('TAIS_HF_TOKEN', 'K2MLX_HF_TOKEN', 'HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN')
+    home = home or _first('TAIS_HF_HOME', 'K2MLX_HF_HOME', 'HF_HOME') or str(root / 'hf-cache')
 
     os.environ['HF_HOME'] = str(home)
     if endpoint:
@@ -85,10 +85,10 @@ def add_arguments(parser):
     group = parser.add_argument_group('hugging face')
     group.add_argument('--hf-endpoint', metavar='URL',
                        help='Hub mirror or endpoint, e.g. https://hf-mirror.com '
-                            '(default: $K2MLX_HF_ENDPOINT, then $HF_ENDPOINT)')
+                            '(default: $TAIS_HF_ENDPOINT, then $HF_ENDPOINT)')
     group.add_argument('--hf-token', metavar='TOKEN',
                        help='access token for gated or private repositories '
-                            '(default: $K2MLX_HF_TOKEN, then $HF_TOKEN)')
+                            '(default: $TAIS_HF_TOKEN, then $HF_TOKEN)')
     group.add_argument('--hf-home', metavar='DIR',
                        help='where downloaded files are cached (default: <repo>/hf-cache)')
     group.add_argument('--hf-offline', action='store_true',

@@ -98,8 +98,8 @@ class ContextPolicy:
                 (r * 32 + 256 * 4) for r in ratios if r)
         if self.bytes_per_token <= 0:
             raise ValueError('A full-attention layer is required for context admission')
-        self.reserve = float(os.environ.get('K2_RESERVE_GIB', '6')) * GIB
-        self.workspace = float(os.environ.get('K2_WORKSPACE_GIB', '4')) * GIB
+        self.reserve = float(os.environ.get('TAIS_RESERVE_GIB', os.environ.get('K2_RESERVE_GIB', '6'))) * GIB
+        self.workspace = float(os.environ.get('TAIS_WORKSPACE_GIB', os.environ.get('K2_WORKSPACE_GIB', '4'))) * GIB
         if self.reserve < 0 or self.workspace < 0:
             raise ValueError('Memory reserves must be nonnegative')
 

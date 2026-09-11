@@ -1,6 +1,6 @@
-# k2mlx
+# TAIS MLX Engine
 
-An MLX inference engine for Apple silicon that serves dense, mixture-of-experts,
+**TAIS** (Tais A.I. Synergy) — an inference engine with Apple MLX as its engine. It serves dense, mixture-of-experts, block-diffusion and disk-streamed models behind one HTTP API, and measures what it claims. that serves dense, mixture-of-experts,
 block-diffusion and disk-streamed models behind one HTTP API, and measures what it
 claims. Eighteen profiles run today, from a 2B model to a 35B mixture-of-experts
 whose cold experts stream from SSD.
@@ -10,13 +10,13 @@ architecture code in `vendor/`. **75 regression tests**, and every performance
 number in the documentation comes from a script in this repository.
 
 ```sh
-k2mlx                                         # pick a model interactively and serve it
-k2mlx doctor                                   # environment, dependencies, disk, Hub mirror
-k2mlx models                                   # profiles, sizes, what is downloaded
-k2mlx download qwen3.6-35b-a3b                 # mirror-aware weight download
-k2mlx serve --model qwen3.6-35b-a3b --detach   # HTTP server on :8080
-k2mlx bench api --model qwen3.6-35b-a3b        # correctness of chat, streaming, prefix reuse
-k2mlx stop
+tais                                          # pick a model interactively and serve it
+tais doctor                                   # environment, dependencies, disk, Hub mirror
+tais models                                   # profiles, sizes, what is downloaded
+tais download qwen3.6-35b-a3b                 # mirror-aware weight download
+tais serve --model qwen3.6-35b-a3b --detach   # HTTP server on :8080
+tais bench api --model qwen3.6-35b-a3b        # correctness of chat, streaming, prefix reuse
+tais stop
 ```
 
 Full operator documentation, including every flag and its measured effect, is in
@@ -38,7 +38,7 @@ behaviour and the evidence for it.
   hot-set cache, so models larger than memory still serve.
 - **Mirrors** — any Hub-compatible endpoint via `--hf-endpoint` or
   `K2MLX_HF_ENDPOINT`, with token, cache-location and offline controls.
-- **Context extension** — `k2mlx context --model X --factor 2` writes YaRN rope
+- **Context extension** — `tais context --model X --factor 2` writes YaRN rope
   scaling into a checkpoint and raises its declared window, with the original
   config kept for `--restore`.
 - **Channel output** — GPT-OSS and Muse Glimmer answer inside a channel envelope;

@@ -1,4 +1,4 @@
-"""k2mlx command line: serve, download, inspect and measure the engine.
+"""tais command line: serve, download, inspect and measure the engine.
 
 The heavy lifting lives in the modules this dispatches to - ``serve.py`` runs the
 HTTP server, ``setup_models.py`` and ``setup_gguf.py`` fetch weights, and the
@@ -131,7 +131,7 @@ def cmd_models(args):
             reason = row.get('reason', 'not downloaded').strip()
             hint = 'partial' if 'incomplete' in reason.lower() else 'missing'
             print(f"  {row['model']:<{width}}  {'-':>13}  {hint}: {reason[:60]}"
-                  f"  ->  k2mlx download {row['model']}")
+                  f"  ->  tais download {row['model']}")
     return 0
 
 
@@ -164,7 +164,7 @@ def cmd_context(args):
     if result.get('changed'):
         print(f"\n{path.name}: context extended to {result['new_max']:,} tokens "
               f"(YaRN factor {args.factor} on {result['original_max']:,}). "
-              f"Restore with `k2mlx context --restore --path {path}`.")
+              f"Restore with `tais context --restore --path {path}`.")
     return 0
 
 
@@ -175,7 +175,7 @@ def cmd_doctor(args):
     from version import __version__
 
     problems, notes = [], []
-    print(f'k2mlx {__version__}')
+    print(f'tais {__version__}')
     print(f'  python      {platform.python_version()} ({platform.machine()})')
 
     lock = {}
@@ -218,7 +218,7 @@ def cmd_doctor(args):
                      if _resolves(alias, resolve_profile, parse_options)]
         print(f'  profiles    {len(available)} of {len(PROFILES)} downloaded')
         if not available:
-            notes.append('no profile weights are present; run k2mlx download <model>')
+            notes.append('no profile weights are present; run tais download <model>')
     except Exception as exc:
         problems.append(f'profile table unusable: {exc}')
 
@@ -278,24 +278,24 @@ def cmd_pick(args):
 
 def cmd_version(args):
     from version import __version__
-    print(f'k2mlx {__version__}')
+    print(f'tais {__version__}')
     return 0
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        prog='k2mlx',
+        prog='tais',
         description='MLX inference engine for Apple silicon: dense, MoE, block-diffusion '
                     'and streaming-expert models.',
         epilog=f'scripts live in {ROOT}; engine options after `serve` are passed through '
-               'unchanged. Run `k2mlx serve` with no --model and it offers a selection '
+               'unchanged. Run `tais serve` with no --model and it offers a selection '
                'with each profile\'s context and speed on this machine.')
     from version import __version__
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     sub = parser.add_subparsers(dest='command', required=True)
 
     serve = sub.add_parser('serve', help='run the inference server', add_help=False,
-                           usage='k2mlx serve [--detach] <engine options>',
+                           usage='tais serve [--detach] <engine options>',
                            description='Everything after `serve` is passed to the engine '
                                        'unchanged, except --detach which this command consumes. '
                                        'Run `python serve.py --help` for the engine options.')
@@ -314,7 +314,7 @@ def build_parser():
 
     import hf_env
     download = sub.add_parser('download', help='fetch profile weights from the Hub or a mirror')
-    download.add_argument('models', nargs='+', help='profile names, as shown by `k2mlx models`')
+    download.add_argument('models', nargs='+', help='profile names, as shown by `tais models`')
     download.add_argument('--metadata-only', action='store_true',
                           help='config and tokenizer only, no weight shards')
     hf_env.add_arguments(download)
@@ -391,7 +391,7 @@ def _run(args):
     except KeyboardInterrupt:
         return 130
     except BrokenPipeError:
-        # `k2mlx models | head` closes the pipe early; say nothing about it.
+        # `tais models | head` closes the pipe early; say nothing about it.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
 

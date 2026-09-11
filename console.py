@@ -1,4 +1,4 @@
-"""Interactive model selector for `k2mlx serve`.
+"""Interactive model selector for `tais serve`.
 
 Shows every profile with what it costs on this machine right now - the context it
 can hold once its weights are resident, and how fast it generates - and starts the
@@ -66,7 +66,7 @@ def render(rows, cursor, memory, width):
     lines = []
     free = memory['available'] / 2**30
     total = memory['total'] / 2**30
-    lines.append(f'{BOLD}k2mlx{RESET} {DIM}model selector{RESET}   '
+    lines.append(f'{BOLD}tais{RESET} {DIM}model selector{RESET}   '
                  f'{DIM}memory{RESET} {free:.0f} of {total:.0f} GiB free   '
                  f'{DIM}keys{RESET} up/down move, enter serve, r refresh, q quit')
     lines.append('')
@@ -184,7 +184,7 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
 
 
 def main(argv=None):
-    """Entry point for `k2mlx pick`."""
+    """Entry point for `tais pick`."""
     import argparse
 
     import hf_env
@@ -223,11 +223,11 @@ def main(argv=None):
     if chosen is None:
         return 0
     if not chosen['available']:
-        print(f'{chosen["alias"]} is not downloaded yet: k2mlx download {chosen["alias"]}',
+        print(f'{chosen["alias"]} is not downloaded yet: tais download {chosen["alias"]}',
               file=sys.stderr)
         return 1
     if args.dry_run:
-        print(f'k2mlx serve --model {chosen["alias"]}')
+        print(f'tais serve --model {chosen["alias"]}')
         return 0
 
     # Serve in the foreground: the selector owns the terminal until then, and
