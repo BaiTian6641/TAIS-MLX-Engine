@@ -168,6 +168,22 @@ def cmd_context(args):
     return 0
 
 
+def cmd_status(args):
+    """What is running right now, for a prompt or a script."""
+    import services
+
+    found = services.instances()
+    if args.json:
+        print(json.dumps(found, indent=2))
+        return 0
+    if not found:
+        print('no instances running')
+        return 0
+    for record in found:
+        print('  ' + services.summary(record['port']))
+    return 0
+
+
 def cmd_doctor(args):
     import platform
 
@@ -288,11 +304,13 @@ def build_parser():
         description='MLX inference engine for Apple silicon: dense, MoE, block-diffusion '
                     'and streaming-expert models.',
         epilog=f'scripts live in {ROOT}; engine options after `serve` are passed through '
-               'unchanged. Run `tais serve` with no --model and it offers a selection '
-               'with each profile\'s context and speed on this machine.')
+               'unchanged. A bare `tais` opens the service console: every profile with the '
+               'context and speed it has on this machine, and keys to start, monitor and '
+               'stop instances without another command. `tais status` prints the running '
+               'ones for a script.')
     from version import __version__
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
-    sub = parser.add_subparsers(dest='command', required=True)
+    sub = parser.add_subparsers(dest='command', required=False)
 
     serve = sub.add_parser('serve', help='run the inference server', add_help=False,
                            usage='tais serve [--detach] <engine options>',
@@ -333,6 +351,10 @@ def build_parser():
     context.add_argument('--restore', action='store_true', help='put back the saved config')
     context.set_defaults(func=cmd_context)
 
+    status = sub.add_parser('status', help='list running instances')
+    status.add_argument('--json', action='store_true')
+    status.set_defaults(func=cmd_status)
+
     doctor = sub.add_parser('doctor', help='check the environment before serving')
     doctor.set_defaults(func=cmd_doctor)
 
@@ -347,7 +369,7 @@ def build_parser():
     bench.add_argument('--lengths', help='comma-separated context lengths for `bench context`')
     bench.set_defaults(func=cmd_bench)
 
-    pick = sub.add_parser('pick', help='choose a model interactively and serve it',
+    pick = sub.add_parser('pick', help='choose a model and serve it in the foreground',
                           description='Shows every profile with the context it can hold in '
                                       "this machine's free memory and its measured or estimated "
                                       'speed, then serves the one you choose. `--print` shows '
@@ -365,6 +387,11 @@ def build_parser():
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or (argv[0].startswith('-') and argv[0] not in ('-h', '--help', '--version')):
+        # A bare `tais` opens the service console, which is the whole point of
+        # having one command: start, watch and stop instances without flags.
+        import console
+        return console.main([])
     if 'serve' in argv:
         # `serve` forwards unknown options to the engine, so it is split by hand:
         # argparse's REMAINDER stops recognising them once a flag comes first.

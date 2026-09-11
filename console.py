@@ -62,16 +62,36 @@ def collect(profiles, resolve, memory, costs_for):
     return rows
 
 
-def render(rows, cursor, memory, width):
+def status_cell(row, instances):
+    """What the selected profile is doing, from its instance record."""
+    running = instances.get(row['alias'])
+    if not running:
+        return f'{DIM}stopped{RESET}'
+    import time as _time
+    up = int(_time.time() - running.get('started', _time.time()))
+    rate = running.get('rate')
+    bits = [f'{GREEN}:{running["port"]}{RESET}', f'{up // 60}m{up % 60:02d}s']
+    if rate:
+        bits.append(f'{rate:.0f} tok/s')
+    if running.get('active') is not None:
+        bits.append(f'{running["active"]} req')
+    return ' '.join(bits)
+
+
+def render(rows, cursor, memory, width, instances=None, watching=None, notice=None):
+    instances = instances or {}
     lines = []
     free = memory['available'] / 2**30
     total = memory['total'] / 2**30
-    lines.append(f'{BOLD}tais{RESET} {DIM}model selector{RESET}   '
+    running = sum(1 for alias in instances if instances[alias])
+    lines.append(f'{BOLD}TAIS MLX Engine{RESET} {DIM}services{RESET}   '
                  f'{DIM}memory{RESET} {free:.0f} of {total:.0f} GiB free   '
-                 f'{DIM}keys{RESET} up/down move, enter serve, r refresh, q quit')
+                 f'{DIM}running{RESET} {running}   '
+                 f'{DIM}keys{RESET} enter start/monitor, s start, x stop, l logs, '
+                 f'r refresh, q quit')
     lines.append('')
     header = (f'  {"model":<22}{"weights":>9}{"kind":>11}{"ctx (here)":>12}'
-              f'{"native":>9}{"decode":>9}{"prefill":>10}   ')
+              f'{"native":>9}{"decode":>9}{"prefill":>10}   {"status":<22}')
     lines.append(f'{DIM}{header}{RESET}')
     for index, row in enumerate(rows):
         selected = index == cursor
@@ -89,21 +109,35 @@ def render(rows, cursor, memory, width):
             note = row.get('reason', '') or row.get('source', '')
             line = (f'{pointer} {row["alias"]:<22}{human_gib(row.get("weights_gib")):>9}'
                     f'{row.get("kind", "-"):>11}{ctx:>12}{native:>9}{decode:>9}{prefill:>10}   '
-                    f'{GREEN if not row.get("reason") else YELLOW}{note}{RESET}')
+                    f'{status_cell(row, instances)}')
+            if note and not instances.get(row['alias']):
+                line += f'  {GREEN if not row.get("reason") else YELLOW}{note}{RESET}'
         lines.append(line[:width + 40] if width else line)
     lines.append('')
     lines.append(f'{DIM}ctx (here) is what fits beside the weights in current free memory; '
                  f'native is the model\'s declared window.{RESET}')
     lines.append(f'{DIM}~ marks a bandwidth estimate rather than a measurement; '
                  f'decode is tokens/s single stream, prefill tokens/s on a warm prompt.{RESET}')
+    if watching:
+        lines.append('')
+        lines.extend(watching)
+    if notice:
+        lines.append('')
+        lines.append(f'{YELLOW}{notice}{RESET}')
     return lines
 
 
-def read_key(fd):
-    """One keypress: an arrow key, a character, or None on end of input."""
+def read_key(fd, timeout=None):
+    """One keypress: an arrow key, a character, None on end of input.
+
+    With a timeout, ``timeout`` comes back instead of blocking, which is what
+    lets the service view tick while nothing is pressed.
+    """
     import termios
     import tty
 
+    if timeout is not None and not select_ready(fd, timeout):
+        return 'timeout'
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
@@ -183,8 +217,144 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
         print('\033[?25h', end='')
 
 
+def monitor_lines(record, log_tail=6):
+    """Live panel for one instance: its sample, then the last log lines."""
+    import services
+
+    port = record['port']
+    sample = services.metrics(port) or {}
+    extra = sample.get('extra') or {}
+    lines = [f'{BOLD}{record.get("alias")}{RESET} {DIM}on port {port}, pid {record.get("pid")}{RESET}']
+    for key in ('decode_tps', 'prefill_tps', 'requests', 'active', 'completed', 'errors'):
+        value = sample.get(key, extra.get(key))
+        if value is not None:
+            lines.append(f'  {DIM}{key}{RESET} {value}')
+    for key in ('mlx_active_gib', 'mlx_peak_gib', 'context_limit', 'disk_entries'):
+        if extra.get(key) is not None:
+            lines.append(f'  {DIM}{key}{RESET} {extra[key]}')
+    tail = services.tail(port, log_tail)
+    if tail:
+        lines.append(f'  {DIM}log{RESET}')
+        for entry in tail:
+            lines.append(f'  {DIM}{entry[-100:]}{RESET}')
+    return lines
+
+
+def free_port(start=8080):
+    """The first port nothing is listening on and no record claims."""
+    import services
+    import socket
+
+    taken = {record['port'] for record in services.instances(include_dead=True)}
+    port = start
+    while port < start + 40:
+        if port not in taken:
+            with socket.socket() as probe:
+                if probe.connect_ex(('127.0.0.1', port)) != 0:
+                    return port
+        port += 1
+    return start
+
+
+def services_view(rows, memory, costs_for, refresh=None, recompute=None):
+    """Start, monitor and stop instances from one screen."""
+    import services
+
+    width = shutil.get_terminal_size((100, 40)).columns
+    cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
+    notice = None
+    watching = None
+
+    def live():
+        found = {}
+        for record in services.instances():
+            sample = services.metrics(record['port']) or {}
+            extra = sample.get('extra') or {}
+            found[record['alias']] = {
+                **record,
+                'rate': extra.get('decode_tps') or sample.get('decode_tps'),
+                'active': sample.get('active', sample.get('in_flight')),
+            }
+        return found
+
+    instances = live()
+    fd = sys.stdin.fileno()
+    print('\033[?25l', end='')
+    try:
+        while True:
+            sys.stdout.write('\033[2J\033[H')
+            sys.stdout.write('\n'.join(render(rows, cursor, memory, width, instances,
+                                              watching, notice)) + '\n')
+            sys.stdout.flush()
+            key = read_key(fd, timeout=1.0)
+            if key == 'timeout':
+                instances = live()
+                if watching:
+                    running = instances.get(rows[cursor]['alias'])
+                    watching = monitor_lines(running) if running else None
+                continue
+            if key is None or key in ('q', 'escape'):
+                return 0
+            if key in ('other',):
+                continue
+            if key in ('up', 'k'):
+                cursor = (cursor - 1) % len(rows)
+                watching = None
+            elif key in ('down', 'j'):
+                cursor = (cursor + 1) % len(rows)
+                watching = None
+            elif key == 'r':
+                if refresh:
+                    memory = refresh()
+                if recompute is not None:
+                    rows[:] = recompute()
+                instances = live()
+                notice = None
+            elif key in ('enter', 's'):
+                row = rows[cursor]
+                if not row['available']:
+                    notice = f'{row["alias"]} is not downloaded: tais download {row["alias"]}'
+                    continue
+                running = instances.get(row['alias'])
+                if running:
+                    watching = monitor_lines(running)
+                    notice = None
+                    continue
+                port = free_port()
+                notice = f'starting {row["alias"]} on port {port}...'
+                sys.stdout.write('\033[2J\033[H' + notice + '\n')
+                sys.stdout.flush()
+                record = services.start(row['alias'], port=port)
+                notice = (f'{row["alias"]} listening on {record["port"]} (pid {record["pid"]})'
+                          if record.get('alive') else f'start failed: {record.get("error")}')
+                instances = live()
+            elif key == 'x':
+                row = rows[cursor]
+                running = instances.get(row['alias'])
+                if not running:
+                    notice = f'{row["alias"]} is not running'
+                    continue
+                result = services.stop(running['port'])
+                notice = (f'stopped {row["alias"]}' if result.get('stopped')
+                          else f'not stopped: {result.get("reason")}')
+                watching = None
+                instances = live()
+            elif key in ('l', 'm'):
+                row = rows[cursor]
+                running = instances.get(row['alias'])
+                if not running:
+                    notice = f'{row["alias"]} is not running'
+                    continue
+                watching = None if key == 'l' and watching else monitor_lines(running)
+                if key == 'l' and watching is None:
+                    watching = monitor_lines(running, log_tail=14)
+                notice = None
+    finally:
+        print('\033[?25h', end='')
+
+
 def main(argv=None):
-    """Entry point for `tais pick`."""
+    """Entry point for the service console, and for `tais pick` with --pick."""
     import argparse
 
     import hf_env
@@ -195,6 +365,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--print', action='store_true', dest='dry_run',
                         help='print the table and the command, serve nothing')
+    parser.add_argument('--pick', action='store_true',
+                        help='choose one model and serve it in the foreground, '
+                             'instead of managing instances')
     hf_env.add_arguments(parser)
     args = parser.parse_args(argv or [])
     hf_env.apply_from_args(args, root=ROOT)
@@ -217,9 +390,15 @@ def main(argv=None):
 
     memory, _ = snapshot()
     rows = collect(PROFILES, resolve, memory, costs_for)
+    recompute = lambda: collect(PROFILES, resolve, snapshot()[0], costs_for)  # noqa: E731
+
+    if not args.pick and not args.dry_run and sys.stdin.isatty():
+        # The default screen manages instances: start, watch and stop them.
+        return services_view(rows, memory, costs_for,
+                             refresh=lambda: snapshot()[0], recompute=recompute)
+
     chosen = choose(rows, memory, costs_for, interactive=sys.stdin.isatty(),
-                    refresh=lambda: snapshot()[0],
-                    recompute=lambda: collect(PROFILES, resolve, snapshot()[0], costs_for))
+                    refresh=lambda: snapshot()[0], recompute=recompute)
     if chosen is None:
         return 0
     if not chosen['available']:

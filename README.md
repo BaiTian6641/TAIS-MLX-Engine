@@ -10,7 +10,8 @@ architecture code in `vendor/`. **75 regression tests**, and every performance
 number in the documentation comes from a script in this repository.
 
 ```sh
-tais                                          # pick a model interactively and serve it
+tais                                          # service console: start, monitor and stop
+tais status                                   # what is running, for a script
 tais doctor                                   # environment, dependencies, disk, Hub mirror
 tais models                                   # profiles, sizes, what is downloaded
 tais download qwen3.6-35b-a3b                 # mirror-aware weight download
@@ -25,6 +26,10 @@ behaviour and the evidence for it.
 
 ## What it does
 
+- **One console** — a bare `tais` lists every profile with the context and speed it
+  has on this machine and manages instances from the same screen: enter starts,
+  `x` stops, `l` tails the log, and the status column ticks with live throughput.
+  Several models can run at once on different ports.
 - **Serving** — OpenAI-compatible `/v1/chat/completions`, streaming and not, with
   memory-aware context admission, SSD prompt caching, and telemetry.
 - **Batching** — continuous batching at 1.42x to 1.88x aggregate throughput,

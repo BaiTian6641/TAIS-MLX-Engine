@@ -26,7 +26,17 @@ def gib(value):
 
 def render():
     try:
-        data = json.loads((ROOT / 'metrics.json').read_text())
+        import sys
+        import services
+        port = None
+        for index, item in enumerate(sys.argv):
+            if item == '--port' and index + 1 < len(sys.argv):
+                port = int(sys.argv[index + 1])
+        path = services.metrics_path(port) if port else None
+        if path is None:
+            running = services.instances()
+            path = services.metrics_path(running[0]['port']) if running else ROOT / 'metrics.json'
+        data = json.loads(path.read_text())
     except (OSError, ValueError):
         return Panel('No server metrics yet. Start with: sh start.sh', title='K2 Horizon')
     stale = time.time() - data['updated'] > 4

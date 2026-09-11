@@ -8,7 +8,8 @@ checkpoints/
 hf-cache/
 kv-cache/
 
-# Server state and logs
+# Server state and logs: instance records, per-port metrics and logs
+run/
 server.pid
 server.log
 *.log

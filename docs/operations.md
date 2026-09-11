@@ -16,12 +16,45 @@ been measured against; the versions in `pyproject.toml` are looser bounds for
 people installing from a package index. `tais doctor` reports both, and flags any
 drift.
 
+## The service console
+
+A bare `tais` is the whole service interface: one screen listing every profile
+with the context it can hold here, its measured speed, and what it is currently
+doing.
+
+```
+TAIS MLX Engine services   memory 43 of 64 GiB free   running 1   keys enter start/monitor, s start, x stop, l logs, r refresh, q quit
+
+  model                   weights       kind  ctx (here)   native   decode   prefill   status
+> smollm3-3b                  1.6      dense        262k     262k      115     16153   :8080 2m14s 112 tok/s 1 req
+  llama-3.2-3b                1.7      dense        262k     262k      150         -   stopped
+```
+
+| key | effect |
+|---|---|
+| up / down, `j` / `k` | move the selection |
+| enter, `s` | start the selected model on the first free port; if it is already running, show its live panel |
+| `x` | stop the selected instance |
+| `l` / `m` | toggle the live panel: metrics and the tail of that instance's log |
+| `r` | re-read memory, recompute the context column, refresh instance records |
+| `q`, escape | quit |
+
+Instances run detached, so quitting the console leaves them serving. Each is
+recorded in `run/<port>.json` beside its metrics (`run/<port>.metrics.json`) and
+log, which is what lets several models run at once on different ports and what
+`tais status` reports. Stopping one verifies the pid really is a server of ours
+before signalling it: records outlive crashes, and a recycled pid must never be
+signalled.
+
+`tais serve --model X` starts in the foreground with the engine's own flags, and
+`tais pick` skips the management screen and just chooses a model to serve.
+
 ## Choosing a model
 
-`tais` with no arguments, or `tais pick`, shows every profile with the two
-numbers that decide the choice on a specific machine - the context it can hold
-once its weights are resident, and how fast it generates - and serves the one you
-select. Arrow keys or `j`/`k` move, enter serves, `r` re-reads memory, `q` quits.
+The first column of the console is the choice: every profile with the two numbers
+that decide it on a specific machine - the context it can hold once its weights
+are resident, and how fast it generates. Arrow keys or `j`/`k` move, `r` re-reads
+memory and recomputes, `q` quits.
 
 ```
 tais model selector   memory 47 of 64 GiB free   keys up/down move, enter serve, r refresh, q quit

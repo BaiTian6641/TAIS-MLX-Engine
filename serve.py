@@ -411,7 +411,11 @@ def models_request(self):
 server.APIHandler.handle_models_request = models_request
 
 if __name__ == '__main__':
-    METRICS.start_sampler(ROOT / 'metrics.json', mx)
+    # Metrics live beside the instance record so several servers can run at
+    # once without overwriting each other's samples.
+    run_dir = ROOT / 'run'
+    run_dir.mkdir(exist_ok=True)
+    METRICS.start_sampler(run_dir / f'{OPTIONS.port}.metrics.json', mx)
     kv_quantized = uses_quantized_kv(CONFIG) and OPTIONS.kv_bits > 0
     if (OPTIONS.decode_concurrency > 1 or OPTIONS.prompt_concurrency > 1) and kv_quantized:
         raise SystemExit('Batching needs unquantized KV: the pinned runtime cannot merge quantized '
