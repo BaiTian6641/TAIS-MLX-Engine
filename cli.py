@@ -139,15 +139,18 @@ def cmd_download(args):
 
 def cmd_context(args):
     import context_extension
-
-    if args.restore:
-        print(json.dumps(context_extension.restore(args.path or ROOT / args.model_path), indent=2))
-        return 0
     from model_profiles import PROFILES
 
-    path = args.path or (ROOT / PROFILES[args.model]['path'] if args.model in PROFILES else None)
-    if path is None:
-        raise SystemExit(f'unknown profile {args.model!r}; pass --path instead')
+    if args.path:
+        path = args.path
+    elif args.model in PROFILES:
+        path = ROOT / PROFILES[args.model]['path']
+    else:
+        raise SystemExit('name a profile with --model, or a directory with --path')
+
+    if args.restore:
+        print(json.dumps(context_extension.restore(path), indent=2))
+        return 0
     result = context_extension.extend(path, args.factor, original=args.original,
                                       max_position=args.max_position, force=args.force,
                                       dry_run=args.dry_run)

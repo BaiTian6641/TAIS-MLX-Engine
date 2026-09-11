@@ -1,7 +1,6 @@
 """Download pinned MLX checkpoints into models/. No model execution."""
 import argparse
 import json
-import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -45,8 +44,7 @@ def main():
         if lock_path.exists():
             lock = json.loads(lock_path.read_text())
         else:
-            info = HfApi(**{k: v for k, v in hub.items() if k == 'token'}).model_info(
-                repo, **{k: v for k, v in hub.items() if k == 'endpoint'})
+            info = HfApi(**hub).model_info(repo)
             lock = {'repo_id': repo, 'revision': info.sha}
             lock_path.write_text(json.dumps(lock, indent=2) + '\n')
         patterns = ['*.json', '*.jinja', '*.model', '*.txt']

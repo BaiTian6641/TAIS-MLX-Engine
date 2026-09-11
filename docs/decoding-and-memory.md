@@ -583,22 +583,22 @@ ordinary path, `--mtp-draft` for 1.5-1.6x decoding.
 Two attempts to widen this are now in the engine and worth recording, because
 the second one explains why the ceiling is where it is.
 
-**Storing the prefill snapshot.** `insert_cache` runs after generation, so what
-it stores is the prompt *plus* everything the model produced, and the next turn
-does not continue those tokens. The engine now also snapshots the cache at the
-moment prefill completes (the progress callback's last call) and stores that
-entry under the prompt alone, so a later request that extends the prompt matches
-it directly. Snapshots are handed from the generation thread to the cache
-through a single slot verified by token comparison, not an `id()` table - an
-earlier version keyed by `id(cache)` matched a snapshot to the wrong request
-when Python recycled a freed object's address.
+**A prefill snapshot was tried and removed.** The idea was to store the cache as
+it stood when prefill finished, keyed by the prompt alone, so a later request that
+extends the prompt would match it directly rather than having to trim a stored
+sequence back. It does not work: the snapshot is taken from the progress callback,
+which fires one decode step after the prompt is evaluated, so the cache covers
+more tokens than the key records, and the disk cache correctly refused to store an
+entry whose offset ran past its token list. The feature was silently doing nothing,
+which is worse than not having it, so it is gone.
 
-**Snapshots also exposed an off-by-one in the disk cache.** Entries are indexed
-on `tokens[:-1]`, because a cache that stops at the last sampled token never
-evaluated it. A prefill snapshot is the opposite case - its offset reaches the
-end of the prompt - so it is recorded as `complete` and matched on its final
-token too. Exact repeats of a prompt now hit through this path where they
-previously only hit by trimming.
+**The disk cache distinguishes a complete entry from a sampled tail.** Entries are
+indexed on `tokens[:-1]`, because a cache that stops at the last sampled token
+never evaluated it - and because every caller needs at least one token left to
+process. An entry whose offset reaches the end of its token list is recorded as
+`complete` and may match on its final token, but the returned prefix is still
+capped so a hit can never consume the whole query: the batch generator raises on
+an empty prompt, which is how that invariant was discovered.
 
 Neither closes the chat-turn case, and the reason is not the cache. Measured on
 Qwen3.5-9B, the second turn of a conversation shares **1215 of the first turn's

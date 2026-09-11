@@ -1,7 +1,6 @@
 """Download pinned IQ/K-quant GGUF weights into gguf/. No conversion, no model execution."""
 import argparse
 import json
-import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -33,7 +32,7 @@ def main():
                 raise SystemExit(f'{lock_path.name} pins {lock.get("quant")}; pass --quant {lock.get("quant")} '
                                  'or delete the lock to repin')
         else:
-            info = HfApi().model_info(repo)
+            info = HfApi(**hub).model_info(repo)
             lock = {'repo_id': repo, 'revision': info.sha, 'quant': args.quant}
             lock_path.write_text(json.dumps(lock, indent=2) + '\n')
         print(f'Downloading {alias} {lock["quant"]}: {lock["revision"]}', flush=True)

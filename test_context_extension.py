@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from context_extension import extend, restore, yarn_block
+from context_extension import extend, restore
 
 
 class ContextExtensionTest(unittest.TestCase):

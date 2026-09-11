@@ -1,6 +1,5 @@
 """Host sampling and conservative, dynamically sized context admission."""
 import ctypes
-import json
 import os
 from pathlib import Path
 import re
