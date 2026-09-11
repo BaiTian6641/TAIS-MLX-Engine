@@ -126,7 +126,35 @@ the foreground and logs to stdout, which is what a container wants; with
 | `diffusion` | `check_diffusion.py` | block-diffusion sampling |
 | `runtime`, `capacity`, `gguf-parity` | the matching `check_*.py` | device behaviour, context admission, quantized-weight parity |
 
-## Hugging Face mirrors
+## Clients written for llama.cpp
+
+The engine speaks the OpenAI API, and it also answers the endpoints a
+`llama-server` client expects - which matters because such a client checks
+`/health` first and shows nothing at all if it does not get the answer it wants.
+
+| endpoint | what it returns |
+|---|---|
+| `GET /health`, `/v1/health` | `{"status": "ok"}` once the model is loaded; 503 with llama.cpp's `Loading model` error object before that |
+| `GET /props` | model path and alias, `n_ctx`, `n_embd`, the chat template, and `default_generation_settings` |
+| `GET /v1/models` | the OpenAI list plus the `meta` block (`n_ctx_train`, `n_vocab`, `n_embd`) |
+| `POST /completion` | the native completion: `content`, `tokens`, `stop`, `stop_type`, `timings`; Server-Sent Events when `stream` is true, ending with `data: [DONE]` |
+| `POST /tokenize`, `POST /detokenize` | `{"tokens": [...]}` and `{"content": "..."}` |
+| `GET /slots` | one idle slot |
+| `GET /metrics` | Prometheus text |
+
+The model is loaded at start-up rather than on the first request, so `/health`
+answers honestly and the first client request does not pay for the load.
+
+```sh
+curl localhost:8080/health
+curl localhost:8080/props | jq .n_ctx
+curl -N -X POST localhost:8080/completion -H 'Content-Type: application/json' \
+     -d '{"prompt":"The capital of France is","n_predict":8,"stream":true}'
+```
+
+`check_profile_api.py` exercises all of them for every profile.
+
+## The service console
 
 Weights are fetched through `huggingface_hub`, so any Hub-compatible mirror works.
 Each setting is taken from a flag first, then a `K2MLX_` variable, then the

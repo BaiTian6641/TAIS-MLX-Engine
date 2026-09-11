@@ -100,3 +100,18 @@ class FreePortTest(unittest.TestCase):
             held.listen(1)
             busy = held.getsockname()[1]
             self.assertNotEqual(console.free_port(busy), busy)
+
+
+class CompatInstallTest(unittest.TestCase):
+    def test_install_patches_both_verbs_and_leaves_them_working(self):
+        from mlx_lm import server
+        import llamacpp_compat
+
+        before_get, before_post = server.APIHandler.do_GET, server.APIHandler.do_POST
+        try:
+            llamacpp_compat.install(server, {'alias': 'toy', 'path': '.', 'config': {}},
+                                    type('O', (), {'port': 8080, 'mtp_draft': None})())
+            self.assertIsNot(server.APIHandler.do_GET, before_get)
+            self.assertIsNot(server.APIHandler.do_POST, before_post)
+        finally:
+            server.APIHandler.do_GET, server.APIHandler.do_POST = before_get, before_post

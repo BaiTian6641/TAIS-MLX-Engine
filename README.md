@@ -31,7 +31,11 @@ behaviour and the evidence for it.
   `x` stops, `l` tails the log, and the status column ticks with live throughput.
   Several models can run at once on different ports.
 - **Serving** — OpenAI-compatible `/v1/chat/completions`, streaming and not, with
-  memory-aware context admission, SSD prompt caching, and telemetry.
+  memory-aware context admission, SSD prompt caching, and telemetry. Clients
+  written for `llama.cpp` also work: `/health`, `/props`, `/completion`,
+  `/tokenize`, `/detokenize`, `/slots` and `/metrics` answer in its shapes.
+- **`cli.sh`** — a launcher for a checkout, so the console runs as `./cli.sh`
+  without activating the virtual environment first.
 - **Batching** — continuous batching at 1.42x to 1.88x aggregate throughput,
   where the model's caches allow it, verified to return byte-identical answers.
 - **Speculative decoding** — MTP, which is the variant that pays here: 1.59x over

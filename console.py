@@ -78,7 +78,21 @@ def status_cell(row, instances):
     return ' '.join(bits)
 
 
-def render(rows, cursor, memory, width, instances=None, watching=None, notice=None):
+def window(rows, cursor, height):
+    """The slice of rows to draw, and how many are hidden above and below.
+
+    A terminal shorter than the profile list used to push the selection off the
+    bottom with no way to see it; the view scrolls around the cursor instead.
+    """
+    overhead = 6           # title, blank, header, blank, footnote, footnote
+    visible = max(3, height - overhead)
+    if len(rows) <= visible:
+        return 0, len(rows), 0, 0
+    first = max(0, min(cursor - visible // 2, len(rows) - visible))
+    return first, first + visible, first, len(rows) - (first + visible)
+
+
+def render(rows, cursor, memory, width, height=40, instances=None, watching=None, notice=None):
     instances = instances or {}
     lines = []
     free = memory['available'] / 2**30
@@ -93,7 +107,11 @@ def render(rows, cursor, memory, width, instances=None, watching=None, notice=No
     header = (f'  {"model":<22}{"weights":>9}{"kind":>11}{"ctx (here)":>12}'
               f'{"native":>9}{"decode":>9}{"prefill":>10}   {"status":<22}')
     lines.append(f'{DIM}{header}{RESET}')
-    for index, row in enumerate(rows):
+    first, last, above, below = window(rows, cursor, height)
+    if above:
+        lines.append(f'{DIM}  ^ {above} more{RESET}')
+    for index in range(first, last):
+        row = rows[index]
         selected = index == cursor
         pointer = '>' if selected else ' '
         if not row['available']:
@@ -113,6 +131,8 @@ def render(rows, cursor, memory, width, instances=None, watching=None, notice=No
             if note and not instances.get(row['alias']):
                 line += f'  {GREEN if not row.get("reason") else YELLOW}{note}{RESET}'
         lines.append(line[:width + 40] if width else line)
+    if below:
+        lines.append(f'{DIM}  v {below} more{RESET}')
     lines.append('')
     lines.append(f'{DIM}ctx (here) is what fits beside the weights in current free memory; '
                  f'native is the model\'s declared window.{RESET}')
@@ -151,7 +171,10 @@ def read_key(fd, timeout=None):
             # a slow link) is ignored rather than treated as quit.
             if tail == b'':
                 return 'escape'
-            return {b'[A': 'up', b'[B': 'down', b'OA': 'up', b'OB': 'down'}.get(tail, 'other')
+            return {b'[A': 'up', b'[B': 'down', b'OA': 'up', b'OB': 'down',
+                    b'[5~': 'pageup', b'[6~': 'pagedown',
+                    b'[H': 'home', b'[F': 'end',
+                    b'[1~': 'home', b'[4~': 'end'}.get(tail, 'other')
         if char in (b'\r', b'\n'):
             return 'enter'
         return char.decode('utf-8', 'ignore')
@@ -167,7 +190,8 @@ def select_ready(fd, timeout=0.02):
 
 def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=None):
     """Return the chosen row, or None if the user quit."""
-    width = shutil.get_terminal_size((100, 30)).columns
+    terminal = shutil.get_terminal_size((100, 30))
+    width, height = terminal.columns, terminal.lines
     cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
 
     if not interactive:
@@ -194,8 +218,10 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
     print('\033[?25l', end='')  # hide the cursor
     try:
         while True:
+            terminal = shutil.get_terminal_size((100, 30))
+            width, height = terminal.columns, terminal.lines
             sys.stdout.write('\033[2J\033[H')
-            sys.stdout.write('\n'.join(render(rows, cursor, memory, width)) + '\n')
+            sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height)) + '\n')
             sys.stdout.flush()
             key = read_key(fd)
             if key is None or key in ('q', 'escape'):
@@ -206,6 +232,14 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
                 cursor = (cursor - 1) % len(rows)
             elif key in ('down', 'j'):
                 cursor = (cursor + 1) % len(rows)
+            elif key == 'pageup':
+                cursor = max(0, cursor - max(1, height - 8))
+            elif key == 'pagedown':
+                cursor = min(len(rows) - 1, cursor + max(1, height - 8))
+            elif key == 'home':
+                cursor = 0
+            elif key == 'end':
+                cursor = len(rows) - 1
             elif key == 'r':
                 if refresh:
                     memory = refresh()
@@ -260,7 +294,8 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
     """Start, monitor and stop instances from one screen."""
     import services
 
-    width = shutil.get_terminal_size((100, 40)).columns
+    terminal = shutil.get_terminal_size((100, 40))
+    width, height = terminal.columns, terminal.lines
     cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
     notice = None
     watching = None
@@ -282,8 +317,10 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
     print('\033[?25l', end='')
     try:
         while True:
+            terminal = shutil.get_terminal_size((100, 40))
+            width, height = terminal.columns, terminal.lines
             sys.stdout.write('\033[2J\033[H')
-            sys.stdout.write('\n'.join(render(rows, cursor, memory, width, instances,
+            sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height, instances,
                                               watching, notice)) + '\n')
             sys.stdout.flush()
             key = read_key(fd, timeout=1.0)
@@ -302,6 +339,12 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
                 watching = None
             elif key in ('down', 'j'):
                 cursor = (cursor + 1) % len(rows)
+                watching = None
+            elif key in ('pageup', 'pagedown', 'home', 'end'):
+                step = max(1, height - 8)
+                cursor = {'pageup': max(0, cursor - step),
+                          'pagedown': min(len(rows) - 1, cursor + step),
+                          'home': 0, 'end': len(rows) - 1}[key]
                 watching = None
             elif key == 'r':
                 if refresh:

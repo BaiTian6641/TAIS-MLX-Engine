@@ -433,6 +433,28 @@ if __name__ == '__main__':
         '--max-tokens', '32768', '--temp', '1.0', '--top-p', '0.95',
         '--chat-template-args', json.dumps(PROFILE['chat_template_args']),
     ]
+    # llama.cpp-shaped clients probe /health and read /props before they will
+    # show a model at all; the routes are additive and never shadow the OpenAI
+    # ones, so they are installed unconditionally.
+    import llamacpp_compat
+
+    llamacpp_compat.install(server, PROFILE, OPTIONS)
+    # Load eagerly: /health answers 503 until a model exists, and a client that
+    # probes it before sending work would otherwise see "loading" until someone
+    # else happened to make the first request.
+    original_provider_load = server.ModelProvider.load_default
+
+    def load_then_serve(provider):
+        try:
+            original_provider_load(provider)
+        except Exception as exc:  # a failed load must still leave the server up
+            import logging
+            logging.error('model did not load: %s', exc)
+            return
+        import logging
+        logging.info('model ready: %s', MODEL_ALIAS)
+
+    server.ModelProvider.load_default = load_then_serve
     if OPTIONS.mtp_draft is not None:
         if OPTIONS.decode_concurrency > 1 or OPTIONS.prompt_concurrency > 1:
             raise SystemExit('MTP drafting is single-request; drop the concurrency flags.')
