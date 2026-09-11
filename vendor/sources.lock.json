@@ -1,0 +1,62 @@
+{
+  "flash_vlm": {
+    "repository": "https://github.com/Blaizzy/mlx-vlm",
+    "revision": "8f5dc3ddddbb8d7dd2b88ac51015def6f81fed21",
+    "changes": "Text import closure only; package initializers disable eager multimodal registration.",
+    "files": {
+      "__init__.py": "d4e60167b3ce2ad52167c2f82c6edf3846dc24f74717cc020dbef2b2715b309c",
+      "kv_quant.py": "2936878096435dd2540e7a029b986259e5b7101c972a5be7168495a58e7fbfa3",
+      "models/__init__.py": "d4e60167b3ce2ad52167c2f82c6edf3846dc24f74717cc020dbef2b2715b309c",
+      "models/activations.py": "2ce04422f5670d8c3507f723d33253632e14121f45f2aa8070b08544ea92dfc9",
+      "models/base.py": "4f915923c591faf4b25603b5b5cab4511296a37c7d141553506e6b0760a03a41",
+      "models/cache.py": "f7277421869ffe88a0fd5050ad307bf6a9a2a6c41ff1ce88de30f4b603ae10b6",
+      "models/deepseek_v4/__init__.py": "cbf5743324d60cf037896492bcf9004e9c42e4feae5a5d54cd8143d62299a920",
+      "models/deepseek_v4/hyper_connection.py": "863313696dfc23161b68b61eccbb39f65c6336db8c62d21cb31dd6a6a1db8006",
+      "models/exact_speculative_verify.py": "170d189df3cf4be1d0044ea497e863f04160c6d9f11719462e43f201124b2b96",
+      "models/fast_ops.py": "4223815c63f073270692c32b31f1cbeb4aed01e005a827f1a411e6d26820c2c5",
+      "models/linear.py": "148a56193feaf170097ff1c5edccca8165c1b5df878f1605778c4d3642a4d2fa",
+      "models/mlp.py": "e5413aa08a61ee26ab3bf70fac9aeef2ac9c13342e2a4507c2e7cc908a3273e7",
+      "models/quantized_verifier.py": "f3f3c485f164fbaf237a7f294b44f7fa0ab3e2078bfcfd71c6fab6bf1a877289",
+      "models/qwen3_5/__init__.py": "d4e60167b3ce2ad52167c2f82c6edf3846dc24f74717cc020dbef2b2715b309c",
+      "models/qwen3_5/config.py": "b4db2144b162bbc27c0d843833fdd969413b44260ed1f024866eeadf1832dc0f",
+      "models/qwen3_5/gated_delta.py": "c3eca0ae56026626a3302a08b8ce8a69f7fe7fdb08b41d94f27ad012d6c3270c",
+      "models/qwen3_5/language.py": "df8006a2e9067e64e70b91eeaadc2ce83de0fdb54869570cc88e78f46297c5d7",
+      "models/qwen3_5/qwen3_5.py": "7c0e360a35e1f5d3819677cd6f7e4d7349f4f3dd2fad5fc8f1e374bd514e8f1b",
+      "models/qwen3_5/speculative_verifier.py": "e0b869d60a347b5bc4bc00ce24018831fcbeac177f33fd3bc0dc1c20fec81d63",
+      "models/qwen3_5/vision.py": "a1db23800b564caaedcc79d6a27d76e3186b9315cb68b612d61afbfa69487600",
+      "models/qwen3_5_moe/__init__.py": "d4e60167b3ce2ad52167c2f82c6edf3846dc24f74717cc020dbef2b2715b309c",
+      "models/qwen3_5_moe/config.py": "feda126d7a83379ac8befd9fc5305a4c155c67a58eb25c40e26fa7e05c51abfa",
+      "models/qwen3_5_moe/language.py": "8df08226aea68d2ccea311394e6dc7b5748c71783b19306497328ed31b50150a",
+      "models/qwen3_vl/__init__.py": "d4e60167b3ce2ad52167c2f82c6edf3846dc24f74717cc020dbef2b2715b309c",
+      "models/qwen3_vl/config.py": "8b529cfbd568c7d202140b4d5212be7fe740310c1a80374fa7dd4e59b9763017",
+      "models/qwen3_vl/language.py": "77ead946a5e15aa6463754b190c90c2eb07ac5a1bfbc0de36b7e2f46adb2591c",
+      "models/qwen3_vl/processing_qwen3_vl.py": "8f8acffe91739016a8829217e8745d66141a37b73a2fd646c3989cef05db855b",
+      "models/qwen3_vl/qwen3_vl.py": "12f0393421918eb1cbaa6daa447d93a405762e997f688676688e5c71d987d3ee",
+      "models/qwen3_vl/vision.py": "0c51d19e208e5d8fa7a6751aee0a9360a5bd8783dcfcf532286d14a0f1fbc7f9",
+      "models/qwen4_exp/__init__.py": "d4e60167b3ce2ad52167c2f82c6edf3846dc24f74717cc020dbef2b2715b309c",
+      "models/qwen4_exp/config.py": "50db0f30861901e7a49883feda9bf3eb1b528149216fae80c56f2f8719b41867",
+      "models/qwen4_exp/language.py": "afc65ce7c6beeb91feea2790e4b15586d8f1ae49532f02dc1332b4d503bc1c42",
+      "models/qwen4_exp/ple_storage.py": "da74a867f6c8eeb0142edfd265ad8d01baf07763e5716120e94659fa91f9d2f6",
+      "models/qwen4_exp/qsa_kernel.py": "f53095f69702b3ad99b64edcb11f9385a7f258f868711a8a3d6640a784d2d008",
+      "models/rope_utils.py": "6944f69a03c41cbb9613afbd2f1b54b71c504840aaeb0eade39c6109dbfdd25b",
+      "models/switch_layers.py": "ace00152d1d004e52292d8265af640d8dd69ffa67b8906886b53a99eb21951de",
+      "speculative/__init__.py": "d4e60167b3ce2ad52167c2f82c6edf3846dc24f74717cc020dbef2b2715b309c",
+      "speculative/cache_state.py": "39d35ef0aae0c9298f2fcd3ff6b91b106c6b6c1c3ab6becae216a8fafb2c5300",
+      "speculative/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "speculative/ops/linear.py": "02a8c23259882c4476e682dd574accd9714450ff5e7a6fdc6819d174f24dedfa",
+      "turboquant.py": "301c73808e3ca41a28bbd5f77c5670b1048a522d9ae796cae5202b7724592afe"
+    }
+  },
+  "deepseek_v4": {
+    "repository": "https://github.com/spicyneuron/mlx-lm",
+    "revision": "df50b7a3f370909b3908a024e2f4e2e6fb729521",
+    "changes": "Standalone model/cache/hyper_connection/switch_layers; imports of base/mla/pipeline/activations use pinned mlx_lm.",
+    "files": {
+      "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "cache.py": "09879ece9931d5ca1ffd965647677ea765ebed0d2a18a8a72571978b9ffb2629",
+      "hyper_connection.py": "56314d787a8552efea8b67fb24006d499ee932e2bf0ff18a6bee379fa16241e8",
+      "model.py": "7d881960da908ec30456292da89534321b5d432f49cacf687ba3d8d39449008f",
+      "switch_layers.py": "b69f352fae802b992a9a9f3e8e73dc8121d445fc0c757555821cc9fd7d270eee"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "repo_id": "unsloth/Qwen3.8-Flash-Next-GGUF",
+  "revision": "38bb39ee97821de2c9009abb7e93950eec396e66",
+  "quant": "UD-IQ1_S"
+}
