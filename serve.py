@@ -1,5 +1,6 @@
 """K2 deployment with adaptive context, SSD prompt caching, and live telemetry."""
 import copy
+import dataclasses
 import hashlib
 import json
 import logging
@@ -14,6 +15,7 @@ os.environ.setdefault('HF_HOME', str(ROOT / 'hf-cache'))
 import mlx.core as mx
 from mlx_lm import server, tokenizer_utils
 from disk_cache import DiskPromptCache
+import output_channels
 from runtime_support import ContextPolicy, memory_info
 from telemetry import Telemetry
 from model_profiles import parse_options, resolve_profile, fingerprint, uses_quantized_kv
@@ -363,10 +365,26 @@ original_generate = server.ResponseGenerator.generate
 def generate(self, request, generation_args, progress_callback=None):
     key = METRICS.submit(request)
     try:
-        return original_generate(self, request, generation_args, progress_callback)
+        ctx, responses = original_generate(self, request, generation_args, progress_callback)
     except Exception:
         METRICS.finish(key, error=True)
         raise
+    tokenizer = getattr(self.model_provider, 'tokenizer', None)
+    if tokenizer is None or not output_channels.needs_normalising(tokenizer):
+        return ctx, responses
+    # GPT-OSS and Muse Glimmer answer inside a channel envelope; rewriting it
+    # here means the runtime's own state machine routes the reply and the
+    # reasoning to the right fields, without touching the generation loop.
+    return ctx, _normalised(responses, output_channels.ChannelNormaliser(
+        split_reasoning=bool(getattr(tokenizer, 'has_thinking', False))))
+
+
+def _normalised(responses, normaliser):
+    for response in responses:
+        text = normaliser.feed(response.text)
+        if text != response.text:
+            response = dataclasses.replace(response, text=text)
+        yield response
 
 
 server.ResponseGenerator.generate = generate
