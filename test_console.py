@@ -67,24 +67,37 @@ class RenderTest(unittest.TestCase):
     def memory(self):
         return {'available': 40 * 2**30, 'total': 64 * 2**30}
 
-    def test_columns_shift_with_the_horizontal_offset(self):
-        flat = '\n'.join(console.render(self.rows(), 0, self.memory(), 70, 20, offset=0))
-        shifted = '\n'.join(console.render(self.rows(), 0, self.memory(), 70, 20, offset=16))
-        self.assertIn('model-0', flat)
-        self.assertNotIn('model-0', shifted)
-        self.assertIn('scrolled 16 columns', shifted)
+    def test_no_line_is_wider_than_the_terminal(self):
+        """The bug this replaced: a hand-padded table overflowed and the terminal
+        wrapped it apart."""
+        for width in (40, 60, 80, 100, 120, 200):
+            lines = console.render(self.rows(6), 0, self.memory(), width, 20)
+            widest = max(len(line) for line in lines)
+            self.assertLessEqual(widest, width, f'{width} columns produced a {widest}-column line')
+
+    def test_columns_are_dropped_as_the_terminal_narrows(self):
+        def header(width, mode='auto'):
+            # the table's own header row, not the footer prose
+            lines = console.render(self.rows(), 0, self.memory(), width, 20, mode=mode)
+            return next(line for line in lines if 'ctx (here)' in line)
+        self.assertIn('prefill', header(140))
+        self.assertNotIn('prefill', header(90))
+        self.assertNotIn('weights', header(70))
+        self.assertIn('prefill', header(70, mode='full'))
+
+    def test_status_shows_a_running_instance(self):
+        instances = {'model-1': {'port': 8080, 'pid': 1, 'started': 0, 'rate': 90.0, 'active': 1}}
+        screen = '\n'.join(console.render(self.rows(), 1, self.memory(), 120, 20, instances))
+        self.assertIn(':8080', screen)
+        self.assertIn('90 tok/s', screen)
 
     def test_the_selected_row_is_marked(self):
-        lines = console.render(self.rows(), 2, self.memory(), 90, 20)
-        marked = [line for line in lines if line.startswith('>')]
+        lines = [line for line in console.render(self.rows(), 2, self.memory(), 90, 20) if 'model-' in line]
+        marked = [line for line in lines if line.strip().startswith('>')]
         self.assertEqual(len(marked), 1)
         self.assertIn('model-2', marked[0])
 
-    def test_a_running_instance_shows_its_port(self):
-        instances = {'model-1': {'port': 8080, 'pid': 1, 'started': 0, 'rate': 90.0, 'active': 1}}
-        lines = '\n'.join(console.render(self.rows(), 1, self.memory(), 110, 20, instances))
-        self.assertIn(':8080', lines)
-        self.assertIn('90 tok/s', lines)
+
 
 
 if __name__ == '__main__':

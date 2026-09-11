@@ -64,22 +64,6 @@ def collect(profiles, resolve, memory, costs_for):
     return rows
 
 
-def status_cell(row, instances):
-    """What the selected profile is doing, from its instance record."""
-    running = instances.get(row['alias'])
-    if not running:
-        return f'{DIM}stopped{RESET}'
-    import time as _time
-    up = int(_time.time() - running.get('started', _time.time()))
-    rate = running.get('rate')
-    bits = [f'{GREEN}:{running["port"]}{RESET}', f'{up // 60}m{up % 60:02d}s']
-    if rate:
-        bits.append(f'{rate:.0f} tok/s')
-    if running.get('active') is not None:
-        bits.append(f'{running["active"]} req')
-    return ' '.join(bits)
-
-
 def window(rows, cursor, height):
     """The slice of rows to draw, and how many are hidden above and below.
 
@@ -94,64 +78,137 @@ def window(rows, cursor, height):
     return first, first + visible, first, len(rows) - (first + visible)
 
 
+# Which columns survive a narrow terminal. The table is rendered by rich, which
+# fits it to the width; these decide what to drop rather than squeezing every
+# column until none of them can be read.
+COLUMN_SETS = {
+    'minimal': ('alias', 'max_context', 'decode', 'status'),
+    'compact': ('alias', 'weights', 'kind', 'max_context', 'decode', 'status'),
+    'full': ('alias', 'weights', 'kind', 'max_context', 'native', 'decode', 'prefill', 'status'),
+}
+
+
+def columns_for(width, mode='auto'):
+    if mode in COLUMN_SETS:
+        return COLUMN_SETS[mode]
+    if width < 80:
+        return COLUMN_SETS['minimal']
+    if width < 112:
+        return COLUMN_SETS['compact']
+    return COLUMN_SETS['full']
+
+
+def cycle_mode(mode, step):
+    """Move between the column sets; left shows fewer columns, right more."""
+    order = ('minimal', 'compact', 'full')
+    current = order.index(mode) if mode in order else         order.index('compact')
+    return order[max(0, min(len(order) - 1, current + step))]
+
+
+def status_cell(row, instances):
+    """What the selected profile is doing, from its instance record."""
+    running = instances.get(row['alias'])
+    if not running:
+        return '[dim]stopped[/dim]'
+    up = int(time.time() - running.get('started', time.time()))
+    bits = [f'[green]:{running["port"]}[/green]', f'{up // 60}m{up % 60:02d}s']
+    if running.get('rate'):
+        bits.append(f'{running["rate"]:.0f} tok/s')
+    if running.get('active') is not None:
+        bits.append(f'{running["active"]} req')
+    return ' '.join(bits)
+
+
+def row_cells(row, instances):
+    """The value of every column for one profile, as rich markup."""
+    if not row['available']:
+        blank = {'weights': '-', 'kind': '-', 'max_context': '-', 'native': '-',
+                 'decode': '-', 'prefill': '-', 'status': '[yellow]not downloaded[/yellow]'}
+        return {'alias': row['alias'], **blank}
+    mark = '' if row.get('source') == 'measured' else '[dim]~[/dim]'
+    return {
+        'alias': row['alias'],
+        'weights': human_gib(row.get('weights_gib')),
+        'kind': row.get('kind', '-'),
+        'max_context': human_tokens(row.get('max_context')),
+        'native': human_tokens(row.get('native_context')),
+        'decode': f'{row["decode"]:.0f}{mark}' if row.get('decode') else '-',
+        'prefill': f'{row["prefill"]:.0f}' if row.get('prefill') else '-',
+        'status': status_cell(row, instances),
+    }
+
+
 def render(rows, cursor, memory, width, height=40, instances=None, watching=None,
-           notice=None, offset=0):
+           notice=None, mode='auto'):
+    """The whole screen as a list of lines, none wider than the terminal.
+
+    Rendering is delegated to rich rather than assembled from padded strings.
+    A padded f-string counts an ANSI escape as a column and cannot know the
+    terminal's width, so a table built that way overflows and the terminal wraps
+    it apart - which is exactly what happened here. rich measures the visible
+    width, fits the table, and truncates or wraps cells inside their columns.
+    """
+    from rich.console import Console, Group
+    from rich.table import Table
+    from rich.text import Text
+
     instances = instances or {}
-    lines = []
+    columns = columns_for(width, mode)
     free = memory['available'] / 2**30
     total = memory['total'] / 2**30
     running = sum(1 for alias in instances if instances[alias])
-    lines.append(f'{BOLD}TAIS MLX Engine{RESET} {DIM}services{RESET}   '
-                 f'{DIM}memory{RESET} {free:.0f} of {total:.0f} GiB free   '
-                 f'{DIM}running{RESET} {running}   '
-                 f'{DIM}keys{RESET} enter start/monitor, s start, x stop, l logs, '
-                 f'r refresh, q quit')
-    lines.append('')
-    header = (f'  {"model":<22}{"weights":>9}{"kind":>11}{"ctx (here)":>12}'
-              f'{"native":>9}{"decode":>9}{"prefill":>10}   {"status":<22}')
-    if offset:
-        lines.append(f'{DIM}  ... scrolled {offset} columns right '
-                     f'(left/right to move){RESET}')
-    lines.append(f'{DIM}{header[offset:] if offset else header}{RESET}')
+
+    title = Text.from_markup(
+        f'[bold]TAIS MLX Engine[/bold] [dim]services[/dim]   '
+        f'[dim]memory[/dim] {free:.0f} of {total:.0f} GiB free   '
+        f'[dim]running[/dim] {running}'
+        + ('' if mode == 'auto' else f'   [dim]columns[/dim] {mode}'))
+    keys = Text.from_markup(
+        '[dim]enter start/monitor, s start, x stop, l logs, r refresh, '
+        'left/right columns, q quit[/dim]')
+
+    labels = {'alias': 'model', 'weights': 'weights', 'kind': 'kind',
+              'max_context': 'ctx (here)', 'native': 'native', 'decode': 'decode',
+              'prefill': 'prefill', 'status': 'status'}
+    table = Table(box=None, pad_edge=False, show_header=True, padding=(0, 1))
+    for name in columns:
+        table.add_column(labels[name], no_wrap=(name != 'status'),
+                         justify='left' if name in ('alias', 'kind', 'status') else 'right',
+                         overflow='ellipsis' if name == 'alias' else 'crop')
+
     first, last, above, below = window(rows, cursor, height)
     if above:
-        lines.append(f'{DIM}  ^ {above} more{RESET}')
+        table.add_row(*[''] * len(columns))
     for index in range(first, last):
-        row = rows[index]
-        selected = index == cursor
-        pointer = '>' if selected else ' '
-        if not row['available']:
-            state = f'{YELLOW}not downloaded{RESET}'
-            line = (f'{pointer} {row["alias"]:<22}{"-":>9}{"-":>11}{"-":>12}'
-                    f'{"-":>9}{"-":>9}{"-":>10}   {state}')
-        else:
-            mark = '' if row.get('source') == 'measured' else f'{DIM}~{RESET}'
-            ctx = human_tokens(row.get('max_context'))
-            native = human_tokens(row.get('native_context'))
-            decode = f'{row["decode"]:.0f}{mark}' if row.get('decode') else '-'
-            prefill = f'{row["prefill"]:.0f}' if row.get('prefill') else '-'
-            note = row.get('reason', '') or row.get('source', '')
-            line = (f'{pointer} {row["alias"]:<22}{human_gib(row.get("weights_gib")):>9}'
-                    f'{row.get("kind", "-"):>11}{ctx:>12}{native:>9}{decode:>9}{prefill:>10}   '
-                    f'{status_cell(row, instances)}')
-            if note and not instances.get(row['alias']):
-                line += f'  {GREEN if not row.get("reason") else YELLOW}{note}{RESET}'
-        shifted = line[offset:] if offset else line
-        lines.append(shifted[:width + 40] if width else shifted)
+        cells = row_cells(rows[index], instances)
+        style = 'reverse' if index == cursor else None
+        marker = '> ' if index == cursor else '  '
+        row_values = []
+        for position, name in enumerate(columns):
+            value = cells[name]
+            row_values.append((marker + value) if position == 0 else value)
+        table.add_row(*row_values, style=style)
     if below:
-        lines.append(f'{DIM}  v {below} more{RESET}')
-    lines.append('')
-    lines.append(f'{DIM}ctx (here) is what fits beside the weights in current free memory; '
-                 f'native is the model\'s declared window.{RESET}')
-    lines.append(f'{DIM}~ marks a bandwidth estimate rather than a measurement; '
-                 f'decode is tokens/s single stream, prefill tokens/s on a warm prompt.{RESET}')
+        table.add_row(*[''] * len(columns))
+
+    footer = [Text.from_markup(
+        '[dim]ctx (here) is what fits beside the weights in current free memory; '
+        'native is the model\'s declared window. ~ marks an estimate, not a '
+        'measurement.[/dim]')]
     if watching:
-        lines.append('')
-        lines.extend(watching)
+        footer.append(Text(''))
+        footer.extend(Text.from_markup(line) for line in watching)
     if notice:
-        lines.append('')
-        lines.append(f'{YELLOW}{notice}{RESET}')
-    return lines
+        footer.append(Text(''))
+        footer.append(Text.from_markup(f'[yellow]{notice}[/yellow]'))
+
+    console_ = Console(width=width, force_terminal=False, highlight=False,
+                       no_color=os.environ.get('NO_COLOR') is not None, soft_wrap=False)
+    with console_.capture() as captured:
+        console_.print(Group(title, Text(''), table, Text(''), *footer))
+    # rich fits every rendered line to the console width; splitting its output is
+    # therefore guaranteed to give lines the terminal can display unwrapped.
+    return captured.get().rstrip('\n').split('\n')
 
 
 # The byte sequences terminals send, mapped to actions. Kept as data rather than
@@ -300,7 +357,7 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
     terminal = shutil.get_terminal_size((100, 30))
     width, height = terminal.columns, terminal.lines
     cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
-    offset = 0
+    mode = 'auto'
 
     if not interactive:
         for index, row in enumerate(rows, 1):
@@ -331,7 +388,7 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
                 width, height = terminal.columns, terminal.lines
                 sys.stdout.write('\033[2J\033[H')
                 sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height,
-                                                  offset=offset)) + '\n')
+                                                  mode=mode)) + '\n')
                 sys.stdout.flush()
                 key = read_key(fd)
                 if key is None or key in ('q', 'escape'):
@@ -343,9 +400,7 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
                 elif key in ('down', 'j'):
                     cursor = (cursor + 1) % len(rows)
                 elif key in ('left', 'right'):
-                    step = 8
-                    offset = max(0, min(offset + (step if key == 'right' else -step),
-                                        max(0, width - 20)))
+                    mode = cycle_mode(mode, +1 if key == 'right' else -1)
                 elif key == 'pageup':
                     cursor = max(0, cursor - max(1, height - 8))
                 elif key == 'pagedown':
@@ -372,19 +427,19 @@ def monitor_lines(record, log_tail=6):
     port = record['port']
     sample = services.metrics(port) or {}
     extra = sample.get('extra') or {}
-    lines = [f'{BOLD}{record.get("alias")}{RESET} {DIM}on port {port}, pid {record.get("pid")}{RESET}']
+    lines = [f'[bold]{record.get("alias")}[/bold] [dim]on port {port}, pid {record.get("pid")}[/dim]']
     for key in ('decode_tps', 'prefill_tps', 'requests', 'active', 'completed', 'errors'):
         value = sample.get(key, extra.get(key))
         if value is not None:
-            lines.append(f'  {DIM}{key}{RESET} {value}')
+            lines.append(f'  [dim]{key}[/dim] {value}')
     for key in ('mlx_active_gib', 'mlx_peak_gib', 'context_limit', 'disk_entries'):
         if extra.get(key) is not None:
-            lines.append(f'  {DIM}{key}{RESET} {extra[key]}')
+            lines.append(f'  [dim]{key}[/dim] {extra[key]}')
     tail = services.tail(port, log_tail)
     if tail:
-        lines.append(f'  {DIM}log{RESET}')
+        lines.append('  [dim]log[/dim]')
         for entry in tail:
-            lines.append(f'  {DIM}{entry[-100:]}{RESET}')
+            lines.append(f'  [dim]{entry[-100:].replace("[", "\\[")}[/dim]')
     return lines
 
 
@@ -413,7 +468,7 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
     cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
     notice = None
     watching = None
-    offset = 0
+    mode = 'auto' 
 
     def live():
         found = {}
@@ -437,7 +492,7 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
             width, height = terminal.columns, terminal.lines
             sys.stdout.write('\033[2J\033[H')
             sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height, instances,
-                                              watching, notice, offset)) + '\n')
+                                              watching, notice, mode)) + '\n')
             sys.stdout.flush()
             key = read_key(fd, timeout=1.0)
             if key == 'timeout':
@@ -457,9 +512,7 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
                 cursor = (cursor + 1) % len(rows)
                 watching = None
             elif key in ('left', 'right'):
-                step = 8
-                limit = max(0, width - 20)
-                offset = max(0, min(offset + (step if key == 'right' else -step), limit))
+                mode = cycle_mode(mode, +1 if key == 'right' else -1)
             elif key in ('pageup', 'pagedown', 'home', 'end'):
                 step = max(1, height - 8)
                 cursor = {'pageup': max(0, cursor - step),

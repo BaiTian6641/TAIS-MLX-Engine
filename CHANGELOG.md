@@ -4,6 +4,21 @@ Versions are the engine's own; the pinned runtime versions it is built against a
 in `requirements.lock`. Every number quoted here was measured on an M2 Ultra with
 64 GiB and is reproducible with the `check_*.py` script named beside it.
 
+## 1.4.1 (TAIS MLX Engine)
+
+The console table now fits the terminal.
+
+- Rendering moved from padded f-strings to `rich`, which is already a pinned
+  dependency: it measures visible width (an ANSI escape is not a column), fits the
+  table to the terminal and truncates or wraps *cells* rather than letting the
+  terminal wrap the table apart. The old renderer overflowed on anything narrower
+  than about 110 columns - 134 columns of header on an 80-column terminal - which
+  is what made the table unreadable.
+- Columns are dropped as the window narrows: minimal below 80, compact to 112,
+  full above. Left and right move between those sets, which is what those arrows
+  are for now that nothing overflows.
+- Verified at 40, 60, 80, 100, 130 and 200 columns, and live in a terminal.
+
 ## 1.4.0 (TAIS MLX Engine)
 
 OpenAI surface completed, llama.cpp clients answered, and a launcher.

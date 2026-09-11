@@ -33,11 +33,19 @@ TAIS MLX Engine services   memory 43 of 64 GiB free   running 1   keys enter sta
 | key | effect |
 |---|---|
 | up / down, `j` / `k` | move the selection |
+| left / right | show fewer or more columns (minimal, compact, full) |
 | enter, `s` | start the selected model on the first free port; if it is already running, show its live panel |
 | `x` | stop the selected instance |
 | `l` / `m` | toggle the live panel: metrics and the tail of that instance's log |
 | `r` | re-read memory, recompute the context column, refresh instance records |
 | `q`, escape | quit |
+
+The table is rendered by [rich](https://rich.readthedocs.io), which fits it to the
+terminal: columns are dropped as the window narrows (minimal below 80 columns,
+compact to 112, full above) and no line ever exceeds the width. Building it from
+padded f-strings instead - which is what this did first - counts an ANSI escape
+as a column and cannot see the terminal size, so the table overflowed and the
+terminal wrapped it apart on anything narrower than about 110 columns.
 
 Instances run detached, so quitting the console leaves them serving. Each is
 recorded in `run/<port>.json` beside its metrics (`run/<port>.metrics.json`) and
