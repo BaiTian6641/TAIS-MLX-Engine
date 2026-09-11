@@ -131,9 +131,13 @@ def verify_cache_policy(model):
     cache takes the server down when `--kv-bits` is passed, and a cache without
     merge turns batching into a crash on the first multi-request batch.
     """
+    from mlx_lm.models.cache import make_prompt_cache
+
     from runtime_support import cache_capabilities
 
-    caps = cache_capabilities(model.make_cache())
+    # Not every model class defines make_cache; make_prompt_cache falls back to a
+    # plain KV cache for the ones that do not, which is what the server itself does.
+    caps = cache_capabilities(make_prompt_cache(model))
     METRICS.extra.update(capabilities=caps)
     kv_requested = uses_quantized_kv(CONFIG) and OPTIONS.kv_bits > 0
     if kv_requested and not caps['quantize_safe']:
