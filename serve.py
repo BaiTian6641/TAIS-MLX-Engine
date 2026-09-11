@@ -45,9 +45,12 @@ def offload_stats():
 
 
 METRICS.extra_source = offload_stats
-if PROFILE.get('flash'):
-    from flash_models import register
-    register()
+# Registering the vendored architectures is unconditional and idempotent: the
+# Flash profiles need it for their streaming adapters, and spark2_5 - which the
+# pinned runtime does not ship at all - needs it regardless of how it is served.
+from flash_models import register as register_architectures
+
+register_architectures()
 original_mlx_load = server.load
 
 

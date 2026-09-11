@@ -22,6 +22,7 @@ REPOS = {
     'muse-glimmer-30b': 'mlx-community/Muse-Glimmer-30B-4bit',
     'glm-4.7-flash': 'mlx-community/GLM-4.7-Flash-4bit',
     'minicpm5-2b': 'mlx-community/MiniCPM5-2B-mlx-4Bit',
+    'spark-x2.5-4b': 'XHToken/Spark-X2.5-4B',
     'qwen3.5-9b': 'mlx-community/Qwen3.5-9B-MLX-4bit',
     'qwen3.5-4b': 'mlx-community/Qwen3.5-4B-MLX-4bit',
     'llama-3.2-3b': 'mlx-community/Llama-3.2-3B-Instruct-4bit',

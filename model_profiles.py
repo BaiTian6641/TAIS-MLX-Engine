@@ -37,6 +37,8 @@ PROFILES = {
                       'chat_template_args': {'enable_thinking': True}},
     'minicpm5-2b': {'path': 'models/minicpm5-2b', 'model_type': 'llama',
                     'chat_template_args': {}},
+    'spark-x2.5-4b': {'path': 'models/spark-x2.5-4b', 'model_type': 'spark2_5',
+                      'chat_template_args': {}},
     'qwen3.5-9b': {'path': 'models/qwen3.5-9b', 'model_type': 'qwen3_5',
                    'chat_template_args': {'enable_thinking': True}},
     'qwen3.5-4b': {'path': 'models/qwen3.5-4b', 'model_type': 'qwen3_5',

@@ -32,7 +32,25 @@ def _gemma4_classes(config):
     return TextModel, TextArgs
 
 
+def _spark2_5_classes(config):
+    """Spark2.5, which the pinned runtime does not ship.
+
+    Loaded through the module ported from the checkpoint's own modelling code;
+    its sanitize maps the published tensor names onto this implementation.
+    """
+    from vendor.spark2_5 import Model, ModelArgs
+
+    class TextModel(Model):
+        def sanitize(self, weights):
+            from vendor.spark2_5 import sanitize
+            return sanitize(weights)
+
+    return TextModel, ModelArgs
+
+
 def model_classes(config):
+    if config['model_type'] == 'spark2_5':
+        return _spark2_5_classes(config)
     if config['model_type'] == 'deepseek_v4':
         from vendor.deepseek_v4.model import Model, ModelArgs
         return Model, ModelArgs
@@ -88,7 +106,7 @@ def register():
 
     def load_model(path, *args, **kwargs):
         config = json.loads((Path(path) / 'config.json').read_text())
-        if config.get('model_type') in ('qwen4_exp', 'deepseek_v4', 'gemma4'):
+        if config.get('model_type') in ('qwen4_exp', 'deepseek_v4', 'gemma4', 'spark2_5'):
             kwargs['get_model_classes'] = model_classes
         return original(path, *args, **kwargs)
 
