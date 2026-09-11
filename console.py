@@ -11,9 +11,11 @@ browser or another server changes it, and `r` re-reads it without leaving.
 Without a terminal on stdin the same table is printed and the selection is read as
 a number, so the command works in a script or a pipe.
 """
+import contextlib
 import os
 from pathlib import Path
 import shutil
+import time
 import sys
 
 ROOT = Path(__file__).resolve().parent
@@ -173,34 +175,118 @@ def escape_action(tail):
     return ESCAPE_ACTIONS.get(tail, 'other')
 
 
-def read_key(fd, timeout=None):
-    """One keypress: an arrow key, a character, None on end of input.
+@contextlib.contextmanager
+def raw_terminal(fd):
+    """Raw mode for the whole interactive session, restored on every exit path.
 
-    With a timeout, ``timeout`` comes back instead of blocking, which is what
-    lets the service view tick while nothing is pressed.
+    Setting it per keystroke and restoring it between reads - which is what this
+    did first - leaves the terminal in cooked mode whenever the user is not
+    actively being read from, so an arrow key pressed at the wrong moment is
+    buffered by the line discipline and never arrives as a key.
     """
     import termios
     import tty
 
-    if timeout is not None and not select_ready(fd, timeout):
-        return 'timeout'
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        char = os.read(fd, 1)
-        if char == b'':
-            return None
-        if char == b'\x1b':
-            tail = os.read(fd, 2) if select_ready(fd) else b''
-            # A bare escape quits; an arrow's tail means an arrow; anything else
-            # (a function key, a Home or Delete, or a tail that arrived late over
-            # a slow link) is ignored rather than treated as quit.
-            return escape_action(tail)
-        if char in (b'\r', b'\n'):
-            return 'enter'
-        return char.decode('utf-8', 'ignore')
+        yield
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def enter_raw(fd):
+    """Put the terminal in raw mode and return what it takes to restore it."""
+    import termios
+    import tty
+
+    saved = termios.tcgetattr(fd)
+    tty.setraw(fd)
+    return saved
+
+
+def restore_terminal(fd, saved):
+    import termios
+
+    termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+
+
+# One byte may be read too many when a key sequence ends and the next begins in
+# the same burst; it is pushed back here so read_key sees it rather than losing it.
+_PUSHBACK = bytearray()
+
+
+def read_byte(fd, timeout=None):
+    """One byte, honouring anything pushed back, or None if none arrives."""
+    if _PUSHBACK:
+        byte = bytes(_PUSHBACK[:1])
+        del _PUSHBACK[:1]
+        return byte
+    if timeout is not None and not select_ready(fd, timeout):
+        return None
+    return os.read(fd, 1)
+
+
+def read_escape_tail(fd, budget=0.06):
+    """Everything a terminal sends after ESC, matched as it arrives.
+
+    A terminal sends an arrow as one write but the reader may see it arrive in
+    pieces, so the tail is accumulated until it is a known sequence, cannot become
+    one, or the budget runs out. Whatever is read is consumed either way, so an
+    unrecognised key never leaks into the next read.
+    """
+    tail = b''
+    deadline = time.monotonic() + budget
+    while len(tail) < 8:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        part = read_byte(fd, max(0.0, remaining))
+        if not part:
+            break
+        if part == b'\x1b' and tail:
+            # The next key's escape, arriving in the same burst: keep it for the
+            # caller instead of consuming it into this sequence.
+            _PUSHBACK.extend(part)
+            break
+        tail += part
+        if tail in ESCAPE_ACTIONS:
+            break
+        if not any(sequence.startswith(tail) for sequence in ESCAPE_ACTIONS):
+            # Not one we act on, but it is still a control sequence: consume it to
+            # its final byte so its parameters cannot be read as the next key.
+            while len(tail) < 16:
+                following = read_byte(fd, 0.02)
+                if not following:
+                    break
+                if 0x40 <= following[0] <= 0x7e:
+                    break
+                tail += following
+            break
+    return tail
+
+
+def read_key(fd, timeout=None):
+    """One keypress: an arrow key, a character, None on end of input.
+
+    The terminal must already be raw - the interactive views hold it that way for
+    the session. With a timeout, ``timeout`` comes back instead of blocking, which
+    is what lets the service view tick while nothing is pressed.
+    """
+    char = read_byte(fd, timeout) if timeout is not None else read_byte(fd)
+    if char is None:
+        return 'timeout'
+    if char == b'':
+        return None
+    if char in (b'\x03', b'\x1c'):      # ctrl-c, ctrl-\: raw mode has no signals
+        return 'escape'
+    if char == b'\x04':                 # ctrl-d
+        return None
+    if char == b'\x1b':
+        return escape_action(read_escape_tail(fd))
+    if char in (b'\r', b'\n'):
+        return 'enter'
+    return char.decode('utf-8', 'ignore')
 
 
 def select_ready(fd, timeout=0.02):
@@ -239,41 +325,42 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
     fd = sys.stdin.fileno()
     print('\033[?25l', end='')  # hide the cursor
     try:
-        while True:
-            terminal = shutil.get_terminal_size((100, 30))
-            width, height = terminal.columns, terminal.lines
-            sys.stdout.write('\033[2J\033[H')
-            sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height,
-                                              offset=offset)) + '\n')
-            sys.stdout.flush()
-            key = read_key(fd)
-            if key is None or key in ('q', 'escape'):
-                return None
-            if key == 'other':
-                continue
-            if key in ('up', 'k'):
-                cursor = (cursor - 1) % len(rows)
-            elif key in ('down', 'j'):
-                cursor = (cursor + 1) % len(rows)
-            elif key in ('left', 'right'):
-                step = 8
-                offset = max(0, min(offset + (step if key == 'right' else -step),
-                                    max(0, width - 20)))
-            elif key == 'pageup':
-                cursor = max(0, cursor - max(1, height - 8))
-            elif key == 'pagedown':
-                cursor = min(len(rows) - 1, cursor + max(1, height - 8))
-            elif key == 'home':
-                cursor = 0
-            elif key == 'end':
-                cursor = len(rows) - 1
-            elif key == 'r':
-                if refresh:
-                    memory = refresh()
-                if recompute is not None:
-                    rows[:] = recompute()
-            elif key == 'enter':
-                return rows[cursor]
+        with raw_terminal(fd):
+            while True:
+                terminal = shutil.get_terminal_size((100, 30))
+                width, height = terminal.columns, terminal.lines
+                sys.stdout.write('\033[2J\033[H')
+                sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height,
+                                                  offset=offset)) + '\n')
+                sys.stdout.flush()
+                key = read_key(fd)
+                if key is None or key in ('q', 'escape'):
+                    return None
+                if key == 'other':
+                    continue
+                if key in ('up', 'k'):
+                    cursor = (cursor - 1) % len(rows)
+                elif key in ('down', 'j'):
+                    cursor = (cursor + 1) % len(rows)
+                elif key in ('left', 'right'):
+                    step = 8
+                    offset = max(0, min(offset + (step if key == 'right' else -step),
+                                        max(0, width - 20)))
+                elif key == 'pageup':
+                    cursor = max(0, cursor - max(1, height - 8))
+                elif key == 'pagedown':
+                    cursor = min(len(rows) - 1, cursor + max(1, height - 8))
+                elif key == 'home':
+                    cursor = 0
+                elif key == 'end':
+                    cursor = len(rows) - 1
+                elif key == 'r':
+                    if refresh:
+                        memory = refresh()
+                    if recompute is not None:
+                        rows[:] = recompute()
+                elif key == 'enter':
+                    return rows[cursor]
     finally:
         print('\033[?25h', end='')
 
@@ -343,6 +430,7 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
     instances = live()
     fd = sys.stdin.fileno()
     print('\033[?25l', end='')
+    saved_terminal = enter_raw(fd)
     try:
         while True:
             terminal = shutil.get_terminal_size((100, 40))
@@ -425,6 +513,7 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
                     watching = monitor_lines(running, log_tail=14)
                 notice = None
     finally:
+        restore_terminal(fd, saved_terminal)
         print('\033[?25h', end='')
 
 

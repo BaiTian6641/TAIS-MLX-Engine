@@ -1,11 +1,11 @@
-"""The console reads raw keystrokes, so its key parsing is tested against a real
-pty rather than a mock: an arrow key is a byte sequence, and what matters is that
-the bytes a terminal actually sends produce the action the user expects."""
+"""Key handling, driven with the bytes a terminal actually sends.
+
+A pty was tried as the harness and abandoned: its line discipline holds a bare
+escape until a delimiter arrives, so a test that writes one and reads it back
+blocks forever. A pipe carries the same bytes and none of that.
+"""
 import os
-from pathlib import Path
-import pty
-import termios
-import tty
+import time
 import unittest
 
 import console
@@ -89,3 +89,56 @@ class RenderTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class KeyStreamTest(unittest.TestCase):
+    """Keys read from a pipe, which - unlike a pty - has no line discipline.
+
+    A pty was tried first and abandoned: it holds a bare escape until a delimiter
+    arrives, so a test that writes one and reads it back blocks forever.
+    """
+
+    def setUp(self):
+        self.read_fd, self.write_fd = os.pipe()
+
+    def tearDown(self):
+        os.close(self.read_fd)
+        os.close(self.write_fd)
+
+    def keys(self, data, count):
+        os.write(self.write_fd, data)
+        return [console.read_key(self.read_fd, timeout=0.3) for _ in range(count)]
+
+    def test_a_single_sequence(self):
+        self.assertEqual(self.keys(b'\x1b[A', 1), ['up'])
+        self.assertEqual(self.keys(b'\x1b[B', 1), ['down'])
+        self.assertEqual(self.keys(b'\x1b[C', 1), ['right'])
+        self.assertEqual(self.keys(b'\x1b[D', 1), ['left'])
+
+    def test_a_sequence_split_across_writes(self):
+        os.write(self.write_fd, b'\x1b[')
+        time.sleep(0.01)
+        os.write(self.write_fd, b'A')
+        self.assertEqual(console.read_key(self.read_fd, timeout=0.3), 'up')
+
+    def test_a_burst_of_arrows_is_read_one_key_at_a_time(self):
+        """Terminals deliver fast presses together; each must still be its own key."""
+        self.assertEqual(self.keys(b'\x1b[A\x1b[B\x1b[C\x1b[D', 4),
+                         ['up', 'down', 'right', 'left'])
+
+    def test_arrows_mixed_with_characters(self):
+        self.assertEqual(self.keys(b'q\x1b[Bj', 3), ['q', 'down', 'j'])
+
+    def test_an_unrecognised_sequence_does_not_swallow_the_next_key(self):
+        self.assertEqual(self.keys(b'\x1b[3~q', 2), ['other', 'q'])
+
+    def test_a_bare_escape_is_escape(self):
+        self.assertEqual(self.keys(b'\x1b', 1), ['escape'])
+
+    def test_control_characters(self):
+        self.assertEqual(self.keys(b'\x03', 1), ['escape'])   # ctrl-c
+        self.assertEqual(self.keys(b'\x04', 1), [None])       # ctrl-d
+        self.assertEqual(self.keys(b'\r', 1), ['enter'])
+
+    def test_nothing_available_is_a_timeout_not_a_block(self):
+        self.assertEqual(console.read_key(self.read_fd, timeout=0.05), 'timeout')
