@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "k2mlx"
+dynamic = ["version"]
+description = "MLX inference engine for Apple silicon: dense, MoE, block-diffusion and streaming-expert models"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Runtime versions are pinned in requirements.lock, which is what the engine is
+# tested against; these bounds only keep an install from pulling a major version
+# that has not been validated.
+dependencies = [
+    "mlx>=0.32,<0.33",
+    "mlx-lm>=0.32,<0.33",
+    "numpy>=1.26",
+    "safetensors>=0.4",
+    "transformers>=5.0,<6",
+    "huggingface_hub>=1.0",
+    "gguf>=0.19",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+k2mlx = "cli:main"
+
+[project.urls]
+Documentation = "https://github.com/example/k2mlx#readme"
+
+[tool.setuptools]
+# Flat layout on purpose: the modules are one namespace by design and the engine
+# is run from a checkout. Every module is packaged, so an installed `k2mlx` can
+# still find the check scripts and operator tools it dispatches to.
+py-modules = [
+    "cli",
+    "diffusion_engine",
+    "disk_cache",
+    "expert_cache",
+    "flash_cache",
+    "flash_models",
+    "gguf_import",
+    "gguf_model",
+    "gguf_reader",
+    "hf_env",
+    "iq_metal",
+    "iq_quants",
+    "model_impl",
+    "model_profiles",
+    "monitor",
+    "mtp_speculation",
+    "runtime_support",
+    "serve",
+    "setup_gguf",
+    "setup_models",
+    "start_server",
+    "telemetry",
+    "version",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "version.__version__" }
