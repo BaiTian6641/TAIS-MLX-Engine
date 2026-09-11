@@ -4,6 +4,27 @@ Versions are the engine's own; the pinned runtime versions it is built against a
 in `requirements.lock`. Every number quoted here was measured on an M2 Ultra with
 64 GiB and is reproducible with the `check_*.py` script named beside it.
 
+## 1.4.0 (TAIS MLX Engine)
+
+OpenAI surface completed, llama.cpp clients answered, and a launcher.
+
+- **OpenAI**: `GET /v1/models/{id}` returns one object with the spec's 404 for an
+  unknown id; errors carry the spec's envelope (`message`/`type`/`param`/`code`)
+  instead of the pinned server's flat `{"error": "text"}`, which a client parsing
+  `error.message` renders as nothing; `max_completion_tokens` is honoured; and
+  `/v1/embeddings` answers explicitly rather than with a bare 404.
+- **llama.cpp**: `/health` (the endpoint a `llama-server` client probes before it
+  will show a model), `/props`, `/completion` with Server-Sent Events,
+  `/tokenize`, `/detokenize`, `/slots` and Prometheus `/metrics`. The model loads
+  at start-up so `/health` is honest from the first probe.
+- **Console**: the list scrolls with PageUp/PageDown/Home/End, and the arrow keys
+  are enumerated and tested rather than assumed - left and right scroll the table
+  horizontally, which matters on an 80-column terminal.
+- **`cli.sh`** runs the console from a checkout without activating the virtual
+  environment.
+- `check_profile_api.py` now exercises the compatibility endpoints for every
+  profile, and `test_console.py` covers every key sequence a terminal sends.
+
 ## 1.3.0 (TAIS MLX Engine)
 
 An interactive selector, and the fixes a final review turned up.

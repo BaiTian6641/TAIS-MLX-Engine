@@ -30,6 +30,16 @@ def _loaded(handler):
     return bool(getattr(provider, 'model', None))
 
 
+def openai_error(message, status=400, kind='invalid_request_error', code=None, param=None):
+    """The error body the OpenAI API specifies, which clients read `.message` from.
+
+    The pinned server answers `{"error": "text"}`, which a client parsing
+    `error.message` renders as nothing at all - so a rejected request looks like
+    a silent failure. This is the envelope they expect.
+    """
+    return {'error': {'message': message, 'type': kind, 'param': param, 'code': code}}
+
+
 def install(server, profile, options):
     """Attach the compatibility routes to a running server module."""
     original_get = server.APIHandler.do_GET
@@ -104,25 +114,38 @@ def install(server, profile, options):
             },
         })
 
+    def model_object(handler):
+        import time
+        return {
+            'id': alias,
+            'object': 'model',
+            'created': int(getattr(handler, '_started', 0) or time.time()),
+            'owned_by': 'tais-mlx',
+            'meta': {
+                'vocab_type': 1,
+                'n_vocab': text.get('vocab_size'),
+                'n_ctx_train': int(text.get('max_position_embeddings') or 0),
+                'n_embd': text.get('hidden_size'),
+                'n_params': None,
+                'size': None,
+            },
+        }
+
+    def model_by_id(handler, requested):
+        """`GET /v1/models/{id}`: one object, or the API's 404 for an unknown id."""
+        if requested not in (alias, 'default_model', Path(model_path).name):
+            return send_json(handler, openai_error(
+                f'The model {requested!r} does not exist', status=404,
+                kind='invalid_request_error', code='model_not_found',
+                param='model'), 404)
+        return send_json(handler, model_object(handler))
+
     def models(handler):
         """OpenAI shape plus the `meta` block llama.cpp clients read."""
         import time
         return send_json(handler, {
             'object': 'list',
-            'data': [{
-                'id': alias,
-                'object': 'model',
-                'created': int(getattr(handler, '_started', 0) or time.time()),
-                'owned_by': 'tais-mlx',
-                'meta': {
-                    'vocab_type': 1,
-                    'n_vocab': text.get('vocab_size'),
-                    'n_ctx_train': int(text.get('max_position_embeddings') or 0),
-                    'n_embd': text.get('hidden_size'),
-                    'n_params': None,
-                    'size': None,
-                },
-            }],
+            'data': [model_object(handler)],
         })
 
     def tokenize(handler, body):
@@ -271,18 +294,69 @@ def install(server, profile, options):
                 return health(handler)
             if path == '/props':
                 return props(handler)
+            if path.startswith('/v1/models/'):
+                return model_by_id(handler, path[len('/v1/models/'):])
             if path == '/v1/models':
                 return models(handler)
             if path == '/slots':
                 return slots(handler)
             if path == '/metrics':
                 return metrics(handler)
+            if path == '/v1/embeddings':
+                return send_json(handler, openai_error(
+                    'This server is a text-generation engine; it does not implement '
+                    'embeddings.', status=404, kind='invalid_request_error'), 404)
         except Exception as exc:
             return send_json(handler, {'error': str(exc)}, 500)
         return original_get(handler)
 
+    class ErrorEnvelope:
+        """Rewrite `{"error": "text"}` as the API's envelope on the way out.
+
+        The pinned server writes that flat shape from several places; wrapping the
+        stream is the one hook that catches all of them without replacing the
+        handlers that produce them.
+        """
+
+        def __init__(self, stream):
+            self._stream = stream
+            self._pending = b''
+
+        def write(self, data):
+            if len(data) < 4096 and data.startswith(b'{"error"'):
+                try:
+                    parsed = json.loads(data)
+                except ValueError:
+                    parsed = None
+                if isinstance(parsed, dict) and isinstance(parsed.get('error'), str):
+                    data = json.dumps(openai_error(parsed['error'], status=400)).encode()
+            return self._stream.write(data)
+
+        def __getattr__(self, name):
+            return getattr(self._stream, name)
+
     def do_POST(handler):
+        if not isinstance(handler.wfile, ErrorEnvelope):
+            handler.wfile = ErrorEnvelope(handler.wfile)
         path = urlsplit(handler.path).path.rstrip('/') or '/'
+        # `max_completion_tokens` is the current spelling of `max_tokens`; clients
+        # have started sending it, and a body the server cannot read is a
+        # request that silently ignores the caller's limit.
+        if path in ('/v1/chat/completions', '/v1/completions', '/completion'):
+            length = int(handler.headers.get('Content-Length') or 0)
+            if length:
+                raw = handler.rfile.read(length)
+                try:
+                    parsed = json.loads(raw)
+                except ValueError:
+                    parsed = None
+                if isinstance(parsed, dict) and 'max_completion_tokens' in parsed \
+                        and 'max_tokens' not in parsed:
+                    parsed['max_tokens'] = parsed.pop('max_completion_tokens')
+                    raw = json.dumps(parsed).encode()
+                import io
+                handler.rfile = io.BytesIO(raw)
+                handler.headers.replace_header('Content-Length', str(len(raw)))
         if path not in ('/completion', '/tokenize', '/detokenize'):
             # Anything else belongs to the server's own handler, which reads the
             # body itself - consuming it here would leave that read waiting for

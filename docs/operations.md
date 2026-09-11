@@ -126,6 +126,19 @@ the foreground and logs to stdout, which is what a container wants; with
 | `diffusion` | `check_diffusion.py` | block-diffusion sampling |
 | `runtime`, `capacity`, `gguf-parity` | the matching `check_*.py` | device behaviour, context admission, quantized-weight parity |
 
+## API surface
+
+The OpenAI-compatible endpoints, and what was added to make them complete:
+
+| endpoint | notes |
+|---|---|
+| `POST /v1/chat/completions` | streaming and not; `tools`, `stop`, `seed`, `top_p`, `top_k`, `min_p`, penalties and `logprobs` are read; `max_completion_tokens` is accepted as the current spelling of `max_tokens` |
+| `POST /v1/completions` | OpenAI-shaped completion |
+| `GET /v1/models` | the list, with llama.cpp's `meta` block alongside |
+| `GET /v1/models/{id}` | one object, or the spec's 404 (`code: model_not_found`) |
+| error bodies | `{"error": {"message", "type", "param", "code"}}` - the shape clients read `.message` from. The pinned server's flat `{"error": "text"}` is rewritten into it on the way out, so a rejected request is not rendered as a silent failure |
+| `GET /v1/embeddings` | answered explicitly: this is a generation engine and says so, rather than returning a bare 404 |
+
 ## Clients written for llama.cpp
 
 The engine speaks the OpenAI API, and it also answers the endpoints a

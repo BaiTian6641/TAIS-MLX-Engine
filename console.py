@@ -92,7 +92,8 @@ def window(rows, cursor, height):
     return first, first + visible, first, len(rows) - (first + visible)
 
 
-def render(rows, cursor, memory, width, height=40, instances=None, watching=None, notice=None):
+def render(rows, cursor, memory, width, height=40, instances=None, watching=None,
+           notice=None, offset=0):
     instances = instances or {}
     lines = []
     free = memory['available'] / 2**30
@@ -106,7 +107,10 @@ def render(rows, cursor, memory, width, height=40, instances=None, watching=None
     lines.append('')
     header = (f'  {"model":<22}{"weights":>9}{"kind":>11}{"ctx (here)":>12}'
               f'{"native":>9}{"decode":>9}{"prefill":>10}   {"status":<22}')
-    lines.append(f'{DIM}{header}{RESET}')
+    if offset:
+        lines.append(f'{DIM}  ... scrolled {offset} columns right '
+                     f'(left/right to move){RESET}')
+    lines.append(f'{DIM}{header[offset:] if offset else header}{RESET}')
     first, last, above, below = window(rows, cursor, height)
     if above:
         lines.append(f'{DIM}  ^ {above} more{RESET}')
@@ -130,7 +134,8 @@ def render(rows, cursor, memory, width, height=40, instances=None, watching=None
                     f'{status_cell(row, instances)}')
             if note and not instances.get(row['alias']):
                 line += f'  {GREEN if not row.get("reason") else YELLOW}{note}{RESET}'
-        lines.append(line[:width + 40] if width else line)
+        shifted = line[offset:] if offset else line
+        lines.append(shifted[:width + 40] if width else shifted)
     if below:
         lines.append(f'{DIM}  v {below} more{RESET}')
     lines.append('')
@@ -145,6 +150,27 @@ def render(rows, cursor, memory, width, height=40, instances=None, watching=None
         lines.append('')
         lines.append(f'{YELLOW}{notice}{RESET}')
     return lines
+
+
+# The byte sequences terminals send, mapped to actions. Kept as data rather than
+# inline so every key a user can press is enumerable and testable.
+ESCAPE_ACTIONS = {
+    b'[A': 'up', b'[B': 'down', b'[C': 'right', b'[D': 'left',
+    b'OA': 'up', b'OB': 'down', b'OC': 'right', b'OD': 'left',
+    b'[5~': 'pageup', b'[6~': 'pagedown',
+    b'[H': 'home', b'[F': 'end', b'[1~': 'home', b'[4~': 'end',
+}
+
+
+def escape_action(tail):
+    """What an escape sequence means: an arrow, a jump, or 'other'.
+
+    A bare escape is 'escape' (quit). Anything unrecognised is 'other' and is
+    ignored, so a function key or a Home key never quits the selector.
+    """
+    if tail == b'':
+        return 'escape'
+    return ESCAPE_ACTIONS.get(tail, 'other')
 
 
 def read_key(fd, timeout=None):
@@ -169,12 +195,7 @@ def read_key(fd, timeout=None):
             # A bare escape quits; an arrow's tail means an arrow; anything else
             # (a function key, a Home or Delete, or a tail that arrived late over
             # a slow link) is ignored rather than treated as quit.
-            if tail == b'':
-                return 'escape'
-            return {b'[A': 'up', b'[B': 'down', b'OA': 'up', b'OB': 'down',
-                    b'[5~': 'pageup', b'[6~': 'pagedown',
-                    b'[H': 'home', b'[F': 'end',
-                    b'[1~': 'home', b'[4~': 'end'}.get(tail, 'other')
+            return escape_action(tail)
         if char in (b'\r', b'\n'):
             return 'enter'
         return char.decode('utf-8', 'ignore')
@@ -193,6 +214,7 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
     terminal = shutil.get_terminal_size((100, 30))
     width, height = terminal.columns, terminal.lines
     cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
+    offset = 0
 
     if not interactive:
         for index, row in enumerate(rows, 1):
@@ -221,7 +243,8 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
             terminal = shutil.get_terminal_size((100, 30))
             width, height = terminal.columns, terminal.lines
             sys.stdout.write('\033[2J\033[H')
-            sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height)) + '\n')
+            sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height,
+                                              offset=offset)) + '\n')
             sys.stdout.flush()
             key = read_key(fd)
             if key is None or key in ('q', 'escape'):
@@ -232,6 +255,10 @@ def choose(rows, memory, costs_for, interactive=True, refresh=None, recompute=No
                 cursor = (cursor - 1) % len(rows)
             elif key in ('down', 'j'):
                 cursor = (cursor + 1) % len(rows)
+            elif key in ('left', 'right'):
+                step = 8
+                offset = max(0, min(offset + (step if key == 'right' else -step),
+                                    max(0, width - 20)))
             elif key == 'pageup':
                 cursor = max(0, cursor - max(1, height - 8))
             elif key == 'pagedown':
@@ -299,6 +326,7 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
     cursor = next((i for i, row in enumerate(rows) if row['available']), 0)
     notice = None
     watching = None
+    offset = 0
 
     def live():
         found = {}
@@ -321,7 +349,7 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
             width, height = terminal.columns, terminal.lines
             sys.stdout.write('\033[2J\033[H')
             sys.stdout.write('\n'.join(render(rows, cursor, memory, width, height, instances,
-                                              watching, notice)) + '\n')
+                                              watching, notice, offset)) + '\n')
             sys.stdout.flush()
             key = read_key(fd, timeout=1.0)
             if key == 'timeout':
@@ -340,6 +368,10 @@ def services_view(rows, memory, costs_for, refresh=None, recompute=None):
             elif key in ('down', 'j'):
                 cursor = (cursor + 1) % len(rows)
                 watching = None
+            elif key in ('left', 'right'):
+                step = 8
+                limit = max(0, width - 20)
+                offset = max(0, min(offset + (step if key == 'right' else -step), limit))
             elif key in ('pageup', 'pagedown', 'home', 'end'):
                 step = max(1, height - 8)
                 cursor = {'pageup': max(0, cursor - step),
