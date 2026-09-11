@@ -2,11 +2,11 @@
 
 An MLX inference engine for Apple silicon that serves dense, mixture-of-experts,
 block-diffusion and disk-streamed models behind one HTTP API, and measures what it
-claims. Thirteen profiles run today, from a 3B model to a 35B mixture-of-experts
+claims. Eighteen profiles run today, from a 2B model to a 35B mixture-of-experts
 whose cold experts stream from SSD.
 
 Built on the pinned `mlx-lm` runtime (`requirements.lock`) with vendored
-architecture code in `vendor/`. **49 regression tests**, and every performance
+architecture code in `vendor/`. **75 regression tests**, and every performance
 number in the documentation comes from a script in this repository.
 
 ```sh
