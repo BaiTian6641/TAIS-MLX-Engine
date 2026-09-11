@@ -137,6 +137,28 @@ def cmd_download(args):
     return spawned([str(ROOT / 'setup_models.py'), *argv])
 
 
+def cmd_context(args):
+    import context_extension
+
+    if args.restore:
+        print(json.dumps(context_extension.restore(args.path or ROOT / args.model_path), indent=2))
+        return 0
+    from model_profiles import PROFILES
+
+    path = args.path or (ROOT / PROFILES[args.model]['path'] if args.model in PROFILES else None)
+    if path is None:
+        raise SystemExit(f'unknown profile {args.model!r}; pass --path instead')
+    result = context_extension.extend(path, args.factor, original=args.original,
+                                      max_position=args.max_position, force=args.force,
+                                      dry_run=args.dry_run)
+    print(json.dumps({**result, 'path': str(path)}, indent=2))
+    if result.get('changed'):
+        print(f"\n{path.name}: context extended to {result['new_max']:,} tokens "
+              f"(YaRN factor {args.factor} on {result['original_max']:,}). "
+              f"Restore with `k2mlx context --restore --path {path}`.")
+    return 0
+
+
 def cmd_doctor(args):
     import platform
 
@@ -274,6 +296,19 @@ def build_parser():
                           help='config and tokenizer only, no weight shards')
     hf_env.add_arguments(download)
     download.set_defaults(func=cmd_download)
+
+    context = sub.add_parser('context', help='extend a checkpoint context with YaRN rope scaling')
+    context.add_argument('--model', help='profile to extend')
+    context.add_argument('--path', type=Path, help='checkpoint directory, instead of a profile')
+    context.add_argument('--factor', type=float, default=2.0,
+                         help='length multiplier over the trained window (default: 2)')
+    context.add_argument('--original', type=int, help='trained window, if the config does not say')
+    context.add_argument('--max-position', type=int, dest='max_position',
+                         help='declared maximum after extension (default: original x factor)')
+    context.add_argument('--force', action='store_true', help='replace existing rope scaling')
+    context.add_argument('--dry-run', action='store_true', dest='dry_run')
+    context.add_argument('--restore', action='store_true', help='put back the saved config')
+    context.set_defaults(func=cmd_context)
 
     doctor = sub.add_parser('doctor', help='check the environment before serving')
     doctor.set_defaults(func=cmd_doctor)
