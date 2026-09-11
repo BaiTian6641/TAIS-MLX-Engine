@@ -16,23 +16,20 @@
     "Tracked reference bibliography of the optimization methods used or evaluated (docs/references.md)"
   ],
   "validated": [
-    "chat-turn prefix reuse is blocked by prompt rendering, and it is now measured rather than assumed: the second turn of a Qwen3.5-9B conversation shares 1215 of the first turn's 1219 prompt tokens, diverging at the assistant generation marker, so a rendered conversation is not a token prefix of its own next turn - matching vLLM's production figure of a 1.7% hit rate across 610 agentic traces",
-    "the prompt cache now stores a snapshot taken at prefill completion under the prompt alone, and entries whose offset reaches the end of their token list are marked complete so exact repeats match on the final token - an off-by-one that previously limited reuse to the trimming path",
-    "49 regression tests passed",
-    "the serving flags are now checked against the loaded model instead of being trusted from a table: cache_capabilities() probes the real caches (mirroring what maybe_quantize_kv_cache and the batch check actually do) and serve.py fails fast on disagreement, so the rotating-cache case that would take the server down mid-request is refused at startup and a --kv-bits flag that cannot do anything warns instead of passing silently",
-    "nemotron_h added to the unquantized-KV set: its caches hold recurrent state only, so the flag was a no-op",
-    "MTP serving: 94.4-96.5 tok/s against 59.2 unspeculated over HTTP on the same prompt (1.59x), byte-identical output, 2.91 tokens accepted per target forward logged per request",
-    "MTP mode keeps prompt caches in memory and drafts from a partially cached prefix; the disk cache restores mlx_lm cache classes that the vendored linear-attention layers reject",
-    "prompt-prefix reuse is characterised exactly: an exact repeat hits for every model (97x at 32k on Qwen3.5-9B, 153x on Nemotron) and a strict extension hits, but a chat turn usually hits neither because the stored entry is not a prefix of the next turn's rendering and trimming back to the common prefix needs trim_prompt_cache, which hybrid caches refuse",
-    "MTP in-loop: lossless at every block size, 1.20x on Qwen3.6-35B-A3B and 1.21x on Ornith at the shipped block 3",
-    "block drafters still lose on this target (DFlash 0.55-0.59x, DSpark 0.44-0.97x) while MTP wins - round cost scales with drafting layers times verify width",
-    "batching gives 1.42-1.88x aggregate decode across SmolLM3-3B, Gemma 4 26B-A4B/31B, Qwen3.6-35B-A3B and Nemotron; a 198k-token prefill completes at --prefill-step-size 64 where the default is killed by the Metal command-buffer watchdog"
+    "68 regression tests pass; every profile resolves (18 with weights on disk)",
+    "15 of 16 downloaded profiles serve with default flags end to end, answering a factual question; the two that do not are the partially downloaded Flash profiles, which refuse with an explicit message",
+    "MTP speculation returns byte-identical text to greedy decoding and does not corrupt multi-byte characters (CJK and emoji verified), with finish_reason reported and no template markers in replies",
+    "the serving flags are verified against the loaded model's caches: sliding-window, MLA and recurrent-only families are declared unquantized, and a wrong declaration fails at startup rather than mid-request",
+    "context extension is verified per profile by serving a request afterwards: minicpm5/smollm3/llama/gpt-oss to 262,144, glm-4.7-flash to 405,504, nemotron to 524,288; Qwen3.5-family, Muse Glimmer and Gemma 4 hang and are restored",
+    "Spark2.5 runs from a vendored port of its own modelling code: 55.3 tok/s, 1,048,576 native context, pinned by a test that requires incremental decoding to equal one full forward",
+    "the architecture audit found Muse Glimmer matching, MiniCPM5 and GPT-OSS matching apart from YaRN's ignored truncate flag, and GLM-4.7-Flash differing in MLA norm epsilon and router precision",
+    "an adversarial review's four MTP defects (per-token decoding, unfiltered end-of-turn token, cache keyed by emitted rather than covered tokens, unflushed normaliser) are fixed and verified"
   ],
   "pending": [
-    "chat-turn prefix reuse is blocked by the same cache-trimmability limit that blocked speculation; only exact repeats and strict extensions reuse today",
-    "MTP over the batch generator (concurrent requests) is not wired: the vendored caches are not mergeable",
-    "Llama-3.2-3B does not save a completed prefix checkpoint",
-    "long-prompt prefill costs 14x per token above ~2k, upstream's own behaviour"
+    "the two Flash profiles need their weights downloaded before they can serve",
+    "Qwen3.5-family, Muse Glimmer and Gemma 4 cannot extend context with YaRN in the pinned runtime; they also answer worse at long range than the extended models",
+    "GLM-4.7-Flash and Muse Glimmer are served with vendor-acknowledged precision differences in the pinned runtime (MLA norm epsilon, router matmul precision)",
+    "prompt-prefix reuse remains limited to exact repeats and strict extensions, because a chat turn is not a token prefix of its own next turn"
   ],
   "inference_backend": "MLX only; no llama.cpp inference backend installed."
 }
