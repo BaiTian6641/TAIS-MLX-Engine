@@ -65,6 +65,8 @@ class DiskPromptCache:
         # The final sampled token has not necessarily been evaluated by the model.
         offsets = [c.offset for c in prompt_cache if hasattr(c, 'offset')]
         if not offsets or len(set(offsets)) != 1 or offsets[0] <= 0:
+            logging.info('prompt cache: not saved, offsets %s',
+                         sorted(set(offsets))[:4] if offsets else 'none')
             return
         # A cache whose offset reaches the end of the token list covers every
         # token in it - true of a prefill snapshot, which is taken before any
@@ -72,6 +74,8 @@ class DiskPromptCache:
         complete = len(tokens) <= offsets[0]
         tokens = tokens[:offsets[0]]
         if len(tokens) != offsets[0]:
+            logging.info('prompt cache: not saved, cache offset %d beyond %d tracked tokens',
+                         offsets[0], len(tokens))
             return
         needed = sum(c.nbytes for c in prompt_cache) + len(tokens) * 12 + 65536
         if needed > self.max_bytes:
