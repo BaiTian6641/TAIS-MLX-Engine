@@ -249,11 +249,14 @@ def build_parser():
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     sub = parser.add_subparsers(dest='command', required=True)
 
-    serve = sub.add_parser('serve', help='run the inference server')
+    serve = sub.add_parser('serve', help='run the inference server', add_help=False,
+                           usage='k2mlx serve [--detach] <engine options>',
+                           description='Everything after `serve` is passed to the engine '
+                                       'unchanged, except --detach which this command consumes. '
+                                       'Run `python serve.py --help` for the engine options.')
     serve.add_argument('--detach', action='store_true',
                        help='start in the background and write server.pid')
-    serve.add_argument('engine_args', nargs=argparse.REMAINDER,
-                       help='options for the engine, e.g. --model qwen3.6-35b-a3b --port 8081')
+    serve.add_argument('engine_args', nargs=argparse.REMAINDER)
     serve.set_defaults(func=cmd_serve)
 
     stop = sub.add_parser('stop', help='stop a detached server')
@@ -292,7 +295,20 @@ def build_parser():
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if 'serve' in argv:
+        # `serve` forwards unknown options to the engine, so it is split by hand:
+        # argparse's REMAINDER stops recognising them once a flag comes first.
+        index = argv.index('serve')
+        head, tail = argv[:index], argv[index + 1:]
+        args = build_parser().parse_args([*head, 'serve'])
+        args.detach = '--detach' in tail
+        args.engine_args = [item for item in tail if item != '--detach']
+        return _run(args)
+    return _run(build_parser().parse_args(argv))
+
+
+def _run(args):
     if args.command == 'download':
         args.hf_args = []
         for flag, value in (('--hf-endpoint', args.hf_endpoint), ('--hf-token', args.hf_token),
@@ -305,6 +321,10 @@ def main(argv=None):
         return args.func(args) or 0
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:
+        # `k2mlx models | head` closes the pipe early; say nothing about it.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
 
 
 if __name__ == '__main__':
