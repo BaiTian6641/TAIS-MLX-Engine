@@ -124,10 +124,54 @@ below are from `docs/decoding-and-memory.md`, on an M2 Ultra with 64 GiB.
 | `qwen3.5-4b` | 2.3 GiB | 94.8 tok/s | dense |
 | `llama-3.2-3b` | 1.7 GiB | 150.0 tok/s | dense |
 | `smollm3-3b` | 1.6 GiB | 115.2 tok/s | dense |
+| `muse-glimmer-30b` | 18.1 GiB | 26.7 tok/s | dense, 52 layers alternating sliding-window and NoPE attention |
+| `glm-4.7-flash` | 15.7 GiB | 48.2 tok/s | 64-expert MoE; keep thinking enabled, it answers worse without |
+| `gpt-oss-20b` | 11.3 GiB | 82.5 tok/s | MXFP4 MoE, harmony channel output, YaRN from the vendor config |
+| `minicpm5-2b` | 1.4 GiB | 133.0 tok/s | dense, fastest in the table |
 | `qwen3.8-flash`, `deepseek-v4-flash` | — | 11.9 / 3.3 tok/s | streamed IQ1 GGUF; large models that do not fit resident |
 
 Thinking models answer in the `reasoning` field and leave `content` empty until
 they finish; raise `max_tokens` rather than assuming the model failed.
+
+## Extending context
+
+A checkpoint trained at 128K usually tolerates more once its rotary embeddings are
+rescaled, which is what YaRN does. `k2mlx context` writes that scaling into the
+config and raises the declared maximum:
+
+```sh
+k2mlx context --model minicpm5-2b --factor 2 --dry-run   # 131,072 -> 262,144
+k2mlx context --model glm-4.7-flash --factor 2           # 202,752 -> 405,504
+k2mlx context --model minicpm5-2b --restore              # back to the original
+```
+
+The original config is kept as `config.json.pre-yarn`, and the command refuses to
+overwrite scaling a checkpoint already declares unless `--force` is given.
+`gpt-oss-20b` ships YaRN from the vendor (factor 32 over a 4K window); doubling it
+means `--original 4096 --factor 64`.
+
+Two caveats worth knowing before extending anything:
+
+- YaRN restores *usable* length, not the accuracy of the original window. Expect
+  the trained range to be unaffected and quality to fall off with distance beyond
+  it.
+- It is not universal. `muse-glimmer-30b` alternates sliding-window layers with
+  full-attention layers that carry **no** positional embedding at all, and its
+  extended configuration hangs the pinned runtime, so it stays at its native
+  131,072 - which is already the 128K it was trained for. `--restore` puts any
+  extension back.
+
+## Channel output
+
+Two served models do not emit plain text. GPT-OSS wraps its reply in a harmony
+envelope (`<|channel|>analysis<|message|>…<|channel|>final<|message|>…`) and Muse
+Glimmer addresses each message (`to=self` for its own reasoning, `to=user` for the
+reply). Both are answering correctly; a server that forwards the raw stream shows
+template markers and private reasoning. `output_channels.py` rewrites the envelope
+into the ` thinking`/`<｜end▁of▁thinking｜>` convention the runtime's state machine already
+understands, so `content` carries the answer and `reasoning` the deliberation. The
+transform is stateful because markers straddle token boundaries, and its streaming
+output is tested to equal its one-shot output for every chunk size.
 
 ## Troubleshooting
 

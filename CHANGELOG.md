@@ -4,6 +4,51 @@ Versions are the engine's own; the pinned runtime versions it is built against a
 in `requirements.lock`. Every number quoted here was measured on an M2 Ultra with
 64 GiB and is reproducible with the `check_*.py` script named beside it.
 
+## 1.1.0
+
+Four more models, native context extension, and output channels.
+
+### Models
+
+- **MiniCPM5-2B** (dense, 1.4 GiB, 133.0 tok/s - the fastest profile in the table),
+  **GPT-OSS-20B** (MXFP4 MoE, 11.3 GiB, 82.5 tok/s), **Muse-Glimmer-30B** (dense
+  52-layer sliding-window/NoPE hybrid, 18.1 GiB, 26.7 tok/s) and
+  **GLM-4.7-Flash** (64-expert MoE, 15.7 GiB, 48.2 tok/s), each verified through
+  the API harness for chat, streaming and prefix reuse.
+- Not added: **Spark-X2.5-4B** declares a `spark2_5` architecture that is neither
+  in the pinned runtime nor shape-compatible with one that is - it is dense with a
+  headwise attention output gate and mixed sliding-window layers, so it needs a
+  vendored implementation rather than a profile entry. **G9v3-39A5B** was
+  deprioritised at the requester's direction.
+
+### Context extension
+
+- `k2mlx context` writes YaRN rope scaling into a checkpoint and raises its
+  declared window, keeping the original config for `--restore`. Applied:
+  MiniCPM5-2B 131,072 -> 262,144, Muse-Glimmer's sibling profiles likewise,
+  GLM-4.7-Flash 202,752 -> **405,504**, GPT-OSS 4,096 -> 262,144 on top of the
+  vendor's own factor-32 scaling.
+- Muse-Glimmer refuses the extension: its full-attention layers carry no positional
+  embedding, and the extended configuration hangs the runtime. It stays at its
+  native 131,072, which is the 128K it was trained for. `--restore` is the way back
+  and was exercised on real checkpoints.
+
+### Output channels
+
+- GPT-OSS and Muse Glimmer answer inside channel envelopes. `output_channels.py`
+  rewrites them into the ` thinking`/`<｜end▁of▁thinking｜>` convention the runtime understands, so
+  the reply arrives in `content` and the deliberation in `reasoning`. Both models
+  previously returned raw template markers, and Muse Glimmer's answer was buried in
+  its private channel. Streaming output is tested to equal one-shot output at every
+  chunk size.
+
+### Fixed
+
+- `check_profile_api.py` asserted arithmetic ("What is 2 + 2?" -> "4"), which
+  GLM-4.7-Flash answers "5" to while answering "4" to "2+2" - a model behaviour
+  that made a server smoke test fail. It now asks for a capital city, and reports
+  prefix reuse instead of asserting on cache internals.
+
 ## 1.0.0
 
 First release: a single-server MLX engine that serves dense, MoE,
