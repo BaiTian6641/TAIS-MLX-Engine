@@ -67,10 +67,8 @@ behind every borrowed technique are tracked in [References](docs/references.md).
 .venv/bin/python setup_gguf.py qwen3.8-flash deepseek-v4-flash --quant UD-IQ1_S
 ```
 
-The Flash text adapters and cache enhancements are also archived in
-`checkpoints/flash-integration-before-gguf.tar.gz`. Both Flash adapters passed
-small-model and HTTP fixture checks; full Flash checkpoint validation is pending.
-See [Flash integration notes](docs/flash-server.md).
+Both Flash adapters passed small-model and HTTP fixture checks; full Flash
+checkpoint validation is pending. See [Flash integration notes](docs/flash-server.md).
 
 Also supports text generation with Qwen3.8-27B, Qwen3.6-35B-A3B, Ornith-1.5
 35B-A3B, Gemma 4 31B, Gemma 4 26B-A4B and its block-diffusion sibling
