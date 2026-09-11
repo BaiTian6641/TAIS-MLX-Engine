@@ -17,7 +17,6 @@ import time
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx_lm.models import qwen3_5_moe as mlx_moe
 
 from vendor.flash_vlm.models.qwen3_5_moe.config import ModelConfig as VendoredConfig
 from vendor.flash_vlm.models.qwen3_5_moe.language import LanguageModel as VendoredTarget

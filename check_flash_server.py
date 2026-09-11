@@ -1,6 +1,5 @@
 """Exercise the real HTTP wrapper with small Flash architecture fixtures."""
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
