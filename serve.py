@@ -257,36 +257,26 @@ def install_mtp(drafter_path):
                 mx.random.seed(args.seed)
             sampler = server._make_sampler(args, tokenizer)
             self._log_cache_stats()
-            cache, rest = self.prompt_cache.fetch_nearest_cache(
-                self.model_provider.model_key, prompt)
-            logging.info('MTP: prompt cache %s, %d of %d prompt tokens reusable',
-                         'hit' if cache is not None else 'miss',
-                         len(prompt) - len(rest), len(prompt))
-            if cache is not None and len(rest):
-                # Continue from the cached prefix: prefill only the new tokens
-                # and let the round loop draft from there. Cache types survive
-                # reuse because MTP mode holds them in memory rather than
-                # restoring mlx_lm's own classes from disk.
-                prompt_ids = mx.array([rest])
-                ctx.prompt_cache_count = len(prompt) - len(rest)
-            else:
-                # Nothing to reuse (or the whole prompt is already cached, in
-                # which case there is no prefill left to capture the hidden
-                # state the head drafts from): start a fresh cache and prefill
-                # the whole prompt.
-                cache = model.make_cache()
-                prompt_ids = mx.array([prompt])
-                ctx.prompt_cache_count = 0
+            # The speculative round loop's cache holds the prompt plus every
+            # accepted draft, so its offset runs past its key - and a follow-up
+            # turn that fetched it would continue from positions the key does
+            # not record. That is silent corruption, so drafting never shares a
+            # cache with anything: a fresh one per request, discarded at the end.
+            cache = model.make_cache()
+            prompt_ids = mx.array([prompt])
+            ctx.prompt_cache_count = 0
             cache_key = prompt[:]
             stop_matcher = stop_sequences.matcher()
             greedy = getattr(args, 'temp', 1.0) == 0
             # End of turn for these templates is a special token that is not
             # always in the tokenizer's eos list, and the ordinary path strips it
-            # through the text state machine, which this path does not run.
+            # through the text state machine, which this path does not run. Only
+            # the eos set is honoured: the broader all_special_ids includes the
+            # vision and audio markers, which are text-model vocabulary a reply
+            # may legitimately sample.
             eos_ids = set(getattr(tokenizer, 'eos_token_ids', None) or [])
             if not eos_ids and getattr(tokenizer, 'eos_token_id', None) is not None:
                 eos_ids = {tokenizer.eos_token_id}
-            eos_ids |= set(getattr(tokenizer, 'all_special_ids', None) or [])
             emitted, text = 0, ''
             # Tokens are decoded through the tokenizer's own detokenizer: a
             # character whose bytes span several tokens decodes to replacement
@@ -315,20 +305,17 @@ def install_mtp(drafter_path):
                 rqueue.put(server.Response(whole, token, 0.0, None, None))
             detokenizer.finalize()
             tail = detokenizer.last_segment
-            if tail:
-                rqueue.put(server.Response(tail, token, 0.0, None, None))
+            # The end of the reply carries the finish reason, so a client can
+            # tell a completed answer from one truncated at max_tokens.
+            if tail or finish != 'length':
+                rqueue.put(server.Response(tail, token, 0.0, finish, None))
             rounds = getattr(stream_state, 'rounds', 0)
             logging.info('MTP: emitted %d tokens over %d rounds (%.2f accepted per round)',
                          emitted, rounds, emitted / max(rounds, 1))
             rqueue.put(None)
-            # The round loop commits a whole accepted block to the cache before
-            # yielding it token by token, so the cache can hold more than this
-            # loop has emitted. The prompt cache is keyed by the tokens the cache
-            # actually covers, not by what has been sent to the client.
-            covered = cache_coverage(cache)
-            if covered is not None and covered < len(cache_key):
-                del cache_key[covered:]
-            self.prompt_cache.insert_cache(self.model_provider.model_key, cache_key, cache)
+            # The cache covers more tokens than its key, so storing it would
+            # poison the next turn's reuse. It is discarded.
+            del cache, cache_key
         except Exception as exc:
             rqueue.put(exc)
 
@@ -346,7 +333,7 @@ def generate(self, request, generation_args, progress_callback=None):
         METRICS.finish(key, error=True)
         raise
     tokenizer = getattr(self.model_provider, 'tokenizer', None)
-    if tokenizer is None or not output_channels.needs_normalising(tokenizer):
+    if tokenizer is None or not output_channels.addressed(tokenizer):
         return ctx, responses
     # GPT-OSS and Muse Glimmer answer inside a channel envelope; rewriting it
     # here means the runtime's own state machine routes the reply and the
