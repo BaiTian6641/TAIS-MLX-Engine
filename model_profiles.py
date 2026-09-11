@@ -49,12 +49,17 @@ PROFILES = {
 
 
 # Model families whose caches the pinned runtime cannot quantize: DeepSeek's
-# compressed pools, sliding-window caches (`RotatingKVCache Quantization NYI`),
-# and hybrids whose only caches hold recurrent state, where the flag would be a
-# silent no-op. serve.py re-checks these claims against the loaded model's own
-# caches, so a profile that lands here by mistake is reported rather than
+# compressed pools, sliding-window caches (`RotatingKVCache Quantization NYI`,
+# which every model mixing sliding and full attention builds for its sliding
+# layers - Gemma 4, GPT-OSS, Muse Glimmer and Spark2.5 among them), hybrids whose
+# only caches hold recurrent state, where the flag would be a silent no-op, and
+# GLM-4.7-Flash, whose MLA attention unpacks `update_and_fetch` into two names
+# where a quantized cache returns four, so the flag crashes it mid-request rather
+# than degrading it. serve.py re-checks these claims against the loaded model's
+# own caches, so a profile that lands here by mistake is reported rather than
 # quietly served wrong.
-UNQUANTIZED_KV = frozenset({'deepseek_v4', 'gemma4', 'nemotron_h'})
+UNQUANTIZED_KV = frozenset({'deepseek_v4', 'gemma4', 'nemotron_h', 'gpt_oss',
+                            'muse_glimmer', 'spark2_5', 'glm4_moe_lite'})
 
 
 def uses_quantized_kv(config):

@@ -106,6 +106,13 @@ than failing mid-request: batching with quantized KV, batching with a
 non-mergeable cache, KV quantization on a cache type that raises, and MTP with
 concurrency.
 
+Which families quantize their KV cache is declared in `model_profiles.UNQUANTIZED_KV`
+and re-checked against the loaded model's own caches, because getting it wrong is
+not cosmetic: sliding-window layers build a rotating cache that raises on
+quantization, GLM-4.7-Flash's MLA attention unpacks `update_and_fetch` into two
+names where a quantized cache returns four, and the rest of that list hold only
+recurrent state, where the flag would be a silent no-op.
+
 ## Models
 
 `k2mlx models` prints this table live, including download state; the measurements
