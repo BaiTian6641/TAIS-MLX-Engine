@@ -93,8 +93,8 @@ class MLP(nn.Module):
         self.down_proj = nn.Linear(args.intermediate_size, args.hidden_size, bias=args.mlp_bias)
 
     def __call__(self, x):
-        # The reference is gelu-gated; mlx's gelu is the tanh approximation, which
-        # is what the reference's ACT2FN resolves to.
+        # The reference resolves ACT2FN["gelu"] - the exact erf gelu, which is
+        # also mlx's default - so this is the same operation on both sides.
         return self.down_proj(nn.gelu(self.gate_proj(x)) * self.up_proj(x))
 
 
@@ -160,8 +160,14 @@ class DecoderLayer(nn.Module):
         self.post_attention_layernorm = RMSNorm(args.hidden_size, args.rms_norm_eps)
 
     def __call__(self, x: mx.array, mask: Any, cache: Any) -> mx.array:
-        h = x + self.self_attn(self.input_layernorm(x), mask, cache)
-        return h + self.mlp(self.post_attention_layernorm(h))
+        # The reference keeps the residual stream in float32 across the whole
+        # network and casts each block's input to the weight dtype. The norm's
+        # input is therefore already the weight dtype by the time it runs.
+        dtype = self.mlp.down_proj.weight.dtype
+        normed = self.input_layernorm(x).astype(dtype)
+        h = x + self.self_attn(normed, mask, cache)
+        normed = self.post_attention_layernorm(h).astype(dtype)
+        return h + self.mlp(normed)
 
 
 class Model(nn.Module):
@@ -178,7 +184,8 @@ class Model(nn.Module):
     def __call__(self, inputs: mx.array, cache: Optional[List[Any]] = None,
                  capture_layer_ids: Optional[List[int]] = None, **kwargs):
         """Return logits, like the reference's ForCausalLM wrapper."""
-        h = self.embed_tokens(inputs)
+        # The reference holds the residual in float32 throughout.
+        h = self.embed_tokens(inputs).astype(mx.float32)
         if cache is None:
             cache = [None] * len(self.layers)
 
@@ -193,7 +200,7 @@ class Model(nn.Module):
 
         for layer, layer_cache in zip(self.layers, cache):
             h = layer(h, masks[layer.self_attn.layer_type], layer_cache)
-        h = self.norm(h)
+        h = self.norm(h).astype(self.embed_tokens.weight.dtype)
         if self.args.tie_word_embeddings:
             return self.embed_tokens.as_linear(h)
         return self.lm_head(h)
