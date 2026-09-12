@@ -322,6 +322,36 @@ def install_mtp(drafter_path):
     server.ResponseGenerator._serve_single = serve_single
 
 
+original_handle_completion = server.APIHandler.handle_completion
+
+
+def handle_completion(self, request, stop_words):
+    """Prune old reasoning from history before the prompt is even built.
+
+    The attention cost of a token grows with everything before it, so a long
+    conversation of reasoning turns is exactly the workload that slows decode.
+    Dropping the deliberation the model already answered with is what bounds it.
+    """
+    budget = getattr(OPTIONS, 'thinking_budget', None)
+    import logging
+    logging.info('handle_completion entered: budget=%r messages=%r',
+                 budget, type(getattr(request, 'messages', None)).__name__ if hasattr(request, 'messages') else 'absent')
+    if budget is not None and getattr(request, 'messages', None):
+        import thinking_history
+        before = thinking_history.estimate_saved(request.messages, budget)
+        if before:
+            import logging
+            logging.info('thinking history: pruning ~%d chars of older reasoning (budget %s)',
+                         before, budget)
+        request.messages = thinking_history.prune(request.messages, budget)
+    return original_handle_completion(self, request, stop_words)
+
+
+server.APIHandler.handle_completion = handle_completion
+import logging as _lh_log
+_lh_log.getLogger().info('THINKING-HOOK INSTALLED at module top')
+
+
 original_generate = server.ResponseGenerator.generate
 
 
@@ -439,6 +469,14 @@ if __name__ == '__main__':
     import llamacpp_compat
 
     llamacpp_compat.install(server, PROFILE, OPTIONS)
+    # MTP is lossless and faster, so it is on by default where the profile ships
+    # a drafter for it; --no-mtp or an explicit --mtp-draft overrides that.
+    if OPTIONS.mtp_draft is None and not getattr(OPTIONS, 'no_mtp', False):
+        shipped = PROFILE.get('drafter')
+        if shipped and Path(shipped).is_dir():
+            OPTIONS.mtp_draft = Path(shipped)
+            import logging
+            logging.info('MTP drafting enabled with %s', shipped)
     # Load eagerly: /health answers 503 until a model exists, and a client that
     # probes it before sending work would otherwise see "loading" until someone
     # else happened to make the first request.

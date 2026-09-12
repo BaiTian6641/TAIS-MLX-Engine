@@ -19,9 +19,11 @@ PROFILES = {
     'qwen3.8-27b': {'path': 'models/qwen3.8-27b', 'model_type': 'qwen3_5',
                     'chat_template_args': {'enable_thinking': True}},
     'qwen3.6-35b-a3b': {'path': 'models/qwen3.6-35b-a3b', 'model_type': 'qwen3_5_moe',
-                        'chat_template_args': {'enable_thinking': True}},
+                        'chat_template_args': {'enable_thinking': True},
+                        'drafter': 'models/qwen3.6-mtp'},
     'ornith-1.5-35b-a3b': {'path': 'models/ornith-1.5-35b-a3b', 'model_type': 'qwen3_5_moe',
-                           'chat_template_args': {'enable_thinking': True}},
+                           'chat_template_args': {'enable_thinking': True},
+                           'drafter': 'models/qwen3.6-mtp'},
     'nemotron-3.5-30b-a3b': {'path': 'models/nemotron-3.5-30b-a3b', 'model_type': 'nemotron_h',
                              'chat_template_args': {}},
     'gpt-oss-20b': {'path': 'models/gpt-oss-20b', 'model_type': 'gpt_oss',
@@ -84,6 +86,12 @@ def parse_options(argv=None):
     parser.add_argument('--quantized-kv-start', type=int, default=0,
                         help='token position where KV quantization starts; a nonzero value keeps the '
                              'prompt in bf16 and compresses only the growing tail')
+    parser.add_argument('--thinking-budget', type=int, default=None, metavar='TOKENS',
+                        help='trim reasoning in earlier assistant turns to at most this many '
+                             'tokens each; 0 drops all earlier reasoning; omit to keep everything')
+    parser.add_argument('--no-mtp', action='store_true',
+                        help='disable multi-token prediction even when the profile ships a '
+                             'drafter for it (it is lossless and faster, so it is on by default)')
     parser.add_argument('--mtp-draft', type=Path, default=None,
                         help='served MTP head (drafts one token per round); requires a qwen3_5_moe profile')
     parser.add_argument('--decode-concurrency', type=int, default=1,

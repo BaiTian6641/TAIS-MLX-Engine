@@ -156,7 +156,7 @@ resident unless noted. `check_model.py` reproduces the resident rows.
 
 | Profile | Weights resident | Decode | Effective weight traffic |
 |---|---:|---:|---:|
-| Qwen3.8-27B (dense) | 15.1 GiB | 67.6 tok/s | ~1.0 TB/s |
+| Qwen3.8-27B (dense) | 15.1 GiB | ~27 tok/s fresh, ~19 tok/s by 10k tokens | ~0.5 TB/s |
 | Qwen3.6-35B-A3B (MoE) | 19.5 GiB | 169.5 tok/s | ~280 GB/s |
 | K2-Horizon (MoE) | 21.1 GiB | 46.6 tok/s | ~130 GB/s |
 | Gemma 4 26B-A4B (MoE) | 14.2 GiB | 191.7 tok/s | ~150 GB/s |
@@ -164,7 +164,7 @@ resident unless noted. `check_model.py` reproduces the resident rows.
 | DeepSeek-V4-Flash (streamed) | 24.9 GiB + hot set | 3.3 tok/s | 70 GiB of experts on SSD |
 
 The dense Qwen profile is at the memory wall: its whole 15.1 GiB is read on
-every token, which at 67.6 tok/s is about 1 TB/s of effective bandwidth. Nothing
+every token. The earlier 67.6 tok/s figure was stale: re-measured at 26-28 tok/s fresh, degrading with context. Nothing
 except fewer bytes per token (lower-bit weights), fewer tokens per second of
 work (batching), or speculative decoding can improve it.
 
@@ -615,3 +615,30 @@ What would actually fix it is reuse at the level of the conversation rather than
 the token stream - caching after each complete message and rendering each turn
 through the same prefix - which is a change to how prompts are assembled, not to
 the cache.
+
+
+## Decode speed degrades with context, and precision does not change it
+
+Measured on Qwen3.8-27B with a long reasoning-heavy generation (the workload the
+report came from), with the rate taken per 1,024-token window:
+
+| token | tok/s |
+|---:|---:|
+| 1,024 | 27.3 |
+| 4,096 | 26.0 |
+| 6,144 | 22.6 |
+| 8,192 | 21.9 |
+| 10,240 | 18.8 |
+
+That is a 31% drop over 10k tokens. An A/B at kv-bits 0 versus 4 shows the same
+-15% slope in the first 4k either way, so it is attention *compute* growing with
+context, not KV bandwidth - compressing the KV cache to 4 bits saves memory (and
+is on by default: `quantized_kv_start` is 0, so old reasoning is already
+compressed) but does nothing for the slope.
+
+What does help is a smaller effective context. The chat template already drops
+historical thinking for these models, so the remaining lever is clients that put
+reasoning *in* the message content: `--thinking-budget N` prunes every earlier
+assistant turn's reasoning to at most N tokens (0 drops it). Measured on a
+six-turn reasoning-heavy conversation: the prompt falls from 9,609 tokens to
+1,789 (-81%) and the request from 49.5 s to 12.9 s (3.8x faster).

@@ -61,7 +61,7 @@ behaviour and the evidence for it.
 | `k2-horizon` | 19.6 GiB | 46.6 tok/s | dual attention + routed MoVA experts, 524k context |
 | `gemma4-26b-a4b` | 14.3 GiB | 191.7 tok/s | MoE with sliding-window KV, batches at 1.8x |
 | `gemma4-31b` | 16.1 GiB | 22.6 tok/s | dense, 60 layers, bandwidth-bound |
-| `qwen3.8-27b` | 15.0 GiB | 67.6 tok/s | dense |
+| `qwen3.8-27b` | 15.0 GiB | ~27 tok/s fresh, ~19 by 10k | dense |
 | `qwen3.6-35b-a3b` | 19.0 GiB | 77.5 tok/s, 93.2 with MTP | hybrid linear attention, 256 experts |
 | `ornith-1.5-35b-a3b` | 18.2 GiB | 78.2 tok/s, 94.4 with MTP | fine-tune of the same base |
 | `nemotron-3.5-30b-a3b` | 16.6 GiB | 86.2 tok/s | 23 Mamba / 23 MoE / 6 attention layers |

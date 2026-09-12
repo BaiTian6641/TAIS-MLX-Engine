@@ -111,12 +111,12 @@ def status_cell(row, instances):
     if not running:
         return '[dim]stopped[/dim]'
     up = int(time.time() - running.get('started', time.time()))
-    bits = [f'[green]:{running["port"]}[/green]', f'{up // 60}m{up % 60:02d}s']
+    bits = [f'[green]on :{running["port"]}[/green]', f'{up // 60}m']
     if running.get('rate'):
         bits.append(f'{running["rate"]:.0f} tok/s')
-    if running.get('active') is not None:
+    if running.get('active'):
         bits.append(f'{running["active"]} req')
-    return ' '.join(bits)
+    return ' · '.join(bits)
 
 
 def row_cells(row, instances):
@@ -159,13 +159,12 @@ def render(rows, cursor, memory, width, height=40, instances=None, watching=None
     running = sum(1 for alias in instances if instances[alias])
 
     title = Text.from_markup(
-        f'[bold]TAIS MLX Engine[/bold] [dim]services[/dim]   '
-        f'[dim]memory[/dim] {free:.0f} of {total:.0f} GiB free   '
-        f'[dim]running[/dim] {running}'
-        + ('' if mode == 'auto' else f'   [dim]columns[/dim] {mode}'))
+        f'[bold]TAIS[/bold] [dim]MLX Engine · services[/dim]   '
+        f'[dim]{free:.0f} of {total:.0f} GiB free · {running} running[/dim]'
+        + ('' if mode == 'auto' else f' · {mode} columns'))
     keys = Text.from_markup(
-        '[dim]enter start/monitor, s start, x stop, l logs, r refresh, '
-        'left/right columns, q quit[/dim]')
+        '[dim]↑↓ move · enter start/stop · s start · x stop · l logs · '
+        '←→ columns · r refresh · q quit[/dim]')
 
     labels = {'alias': 'model', 'weights': 'weights', 'kind': 'kind',
               'max_context': 'ctx (here)', 'native': 'native', 'decode': 'decode',
@@ -192,9 +191,8 @@ def render(rows, cursor, memory, width, height=40, instances=None, watching=None
         table.add_row(*[''] * len(columns))
 
     footer = [Text.from_markup(
-        '[dim]ctx (here) is what fits beside the weights in current free memory; '
-        'native is the model\'s declared window. ~ marks an estimate, not a '
-        'measurement.[/dim]')]
+        '[dim]ctx (here) fits beside the weights in current free memory; '
+        '~ is an estimate.[/dim]')]
     if watching:
         footer.append(Text(''))
         footer.extend(Text.from_markup(line) for line in watching)
@@ -205,7 +203,7 @@ def render(rows, cursor, memory, width, height=40, instances=None, watching=None
     console_ = Console(width=width, force_terminal=False, highlight=False,
                        no_color=os.environ.get('NO_COLOR') is not None, soft_wrap=False)
     with console_.capture() as captured:
-        console_.print(Group(title, Text(''), table, Text(''), *footer))
+        console_.print(Group(title, keys, Text(''), table, Text(''), *footer))
     # rich fits every rendered line to the console width; splitting its output is
     # therefore guaranteed to give lines the terminal can display unwrapped.
     return captured.get().rstrip('\n').split('\n')
