@@ -322,6 +322,65 @@ def install_mtp(drafter_path):
     server.ResponseGenerator._serve_single = serve_single
 
 
+original_process_message_content = server.process_message_content
+
+
+def process_message_content(messages):
+    """Convert message content to a string, tolerating agentic content parts.
+
+    The pinned implementation raises ValueError("Only 'text' content type is
+    supported") on any part whose type is not "text". An agentic client - an oh-my-pi
+    session, an Anthropic-style tool client - sends legitimate parts like tool_use
+    and tool_result that carry text in a different shape, and a bare error is the
+    wrong answer for them: the content is usable, it is just not one fragment.
+
+    Shapes handled:
+
+    * "text" - the fragment's own text
+    * "tool_use" - "Tool call: name({arguments})"
+    * "tool_result" - the nested content
+    * anything with a "text" field - used as-is
+
+    A genuinely unsupported part - an image or another modality this text model
+    cannot consume - gets a specific message instead of the generic ValueError.
+    """
+    def fragment_text(fragment):
+        ftype = fragment.get("type")
+        if ftype == "text":
+            return fragment.get("text", "")
+        if ftype == "tool_use":
+            name = fragment.get("name", "tool")
+            arguments = fragment.get("input") or fragment.get("arguments") or {}
+            import json as _json
+            return f"Tool call: {name}({_json.dumps(arguments, ensure_ascii=False)})"
+        if ftype == "tool_result":
+            nested = fragment.get("content")
+            if isinstance(nested, list):
+                return "".join(fragment_text(part) for part in nested)
+            return nested or fragment.get("text", "")
+        if isinstance(fragment.get("text"), str):
+            return fragment["text"]
+        raise ValueError(f"Content part of type {ftype!r} is not supported by this "
+                         f"text-only model (multimodal content is not served).")
+
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            message["content"] = "".join(fragment_text(fragment) for fragment in content)
+        elif content is None:
+            message["content"] = ""
+
+        if tool_calls := message.get("tool_calls"):
+            for tool_call in tool_calls:
+                if func := tool_call.get("function"):
+                    if args := func.get("arguments"):
+                        if isinstance(args, str):
+                            func["arguments"] = json.loads(args)
+
+
+server.process_message_content = process_message_content
+
+
 original_handle_completion = server.APIHandler.handle_completion
 
 
