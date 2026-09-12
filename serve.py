@@ -121,8 +121,8 @@ original_provider_init = server.ModelProvider.__init__
 def provider_init(self, args):
     original_provider_init(self, args)
     self._model_map[MODEL_ALIAS] = args.model
-
-
+    global SERVED_PROFILE_NAME
+    SERVED_PROFILE_NAME = args.model
 server.ModelProvider.__init__ = provider_init
 original_load = server.ModelProvider.load
 
@@ -324,52 +324,33 @@ def install_mtp(drafter_path):
 
 original_process_message_content = server.process_message_content
 
+from input_parts import ContentPartError, decode_image, normalize_message_content
+
+# Whether the served profile can consume decoded images. No profile is served
+# through a vision path yet (gemma4/qwen3.6/muse-glimmer ship vision weights,
+# but the text-only serving path strips them; wiring the vendored VLM is the
+# follow-up). Decoded images are kept on the request for when it lands.
+SERVED_SUPPORTS_VISION = False
+SERVED_PROFILE_NAME = "unknown"
+
 
 def process_message_content(messages):
-    """Convert message content to a string, tolerating agentic content parts.
+    """Normalise agentic content parts (text/tool_use/tool_result) into text.
 
-    The pinned implementation raises ValueError("Only 'text' content type is
-    supported") on any part whose type is not "text". An agentic client - an oh-my-pi
-    session, an Anthropic-style tool client - sends legitimate parts like tool_use
-    and tool_result that carry text in a different shape, and a bare error is the
-    wrong answer for them: the content is usable, it is just not one fragment.
-
-    Shapes handled:
-
-    * "text" - the fragment's own text
-    * "tool_use" - "Tool call: name({arguments})"
-    * "tool_result" - the nested content
-    * anything with a "text" field - used as-is
-
-    A genuinely unsupported part - an image or another modality this text model
-    cannot consume - gets a specific message instead of the generic ValueError.
+    The pinned implementation raises ``ValueError("Only 'text' content type is
+    supported")`` on any part whose type is not ``"text"``, which breaks every
+    real agentic client. This handles the legitimate shapes uniformly (see
+    ``input_parts``) and reports a genuinely unsupported part with its type.
     """
-    def fragment_text(fragment):
-        ftype = fragment.get("type")
-        if ftype == "text":
-            return fragment.get("text", "")
-        if ftype == "tool_use":
-            name = fragment.get("name", "tool")
-            arguments = fragment.get("input") or fragment.get("arguments") or {}
-            import json as _json
-            return f"Tool call: {name}({_json.dumps(arguments, ensure_ascii=False)})"
-        if ftype == "tool_result":
-            nested = fragment.get("content")
-            if isinstance(nested, list):
-                return "".join(fragment_text(part) for part in nested)
-            return nested or fragment.get("text", "")
-        if isinstance(fragment.get("text"), str):
-            return fragment["text"]
-        raise ValueError(f"Content part of type {ftype!r} is not supported by this "
-                         f"text-only model (multimodal content is not served).")
+    normalized, images = normalize_message_content(messages)
+    if images and not SERVED_SUPPORTS_VISION:
+        raise ValueError(
+            f"Image content was provided, but profile '{SERVED_PROFILE_NAME}' is "
+            f"served text-only; vision inference is not wired for it."
+        )
+    messages[:] = normalized
 
     for message in messages:
-        content = message.get("content")
-        if isinstance(content, list):
-            message["content"] = "".join(fragment_text(fragment) for fragment in content)
-        elif content is None:
-            message["content"] = ""
-
         if tool_calls := message.get("tool_calls"):
             for tool_call in tool_calls:
                 if func := tool_call.get("function"):
