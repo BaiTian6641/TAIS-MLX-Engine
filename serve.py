@@ -20,6 +20,7 @@ import output_channels
 from runtime_support import ContextPolicy, memory_info
 from telemetry import Telemetry
 from model_profiles import parse_options, resolve_profile, fingerprint, uses_quantized_kv
+from vision_engine import VISION_PROFILES
 
 OPTIONS = parse_options() if __name__ == '__main__' else parse_options([])
 PROFILE = resolve_profile(OPTIONS)
@@ -164,7 +165,7 @@ def load_local(self, model_path, adapter_path=None, draft_model_path=None):
         raise ValueError(f'This process serves only {MODEL_ALIAS}, without adapters or draft models')
     result = original_load(self, model_path, adapter_path, draft_model_path)
     verify_cache_policy(self.model)
-    if PROFILE.get('flash') or OPTIONS.mtp_draft is not None:
+    if PROFILE.get('flash') or OPTIONS.mtp_draft is not None or PROFILE['alias'] in VISION_PROFILES:
         # Streaming adapters and the MTP path both need the single-request
         # generator: the batch generator builds its own cache types, which the
         # vendored linear-attention layers reject.
@@ -316,6 +317,92 @@ def install_mtp(drafter_path):
             # The cache covers more tokens than its key, so storing it would
             # poison the next turn's reuse. It is discarded.
             del cache, cache_key
+        except Exception as exc:
+            rqueue.put(exc)
+
+    server.ResponseGenerator._serve_single = serve_single
+
+
+VISION = {'vm': None}
+
+
+def install_vision():
+    """Route model loading and single-request generation through the full VLM.
+
+    The text-only path strips the vision tower, so it cannot consume images.
+    Here the checkpoint is loaded as a complete VLM (text + vision) via
+    ``vision_engine``; a request with image parts is decoded and run through
+    the VLM, and a text-only request takes the same path (the VLM generates
+    text identically). Generation is single-request: the VLM's prefill needs
+    the pixel values, which the batch generator cannot supply.
+    """
+    import input_parts
+    import vision_engine
+    upstream_load = server.load
+
+    def load_vision(model_path, *args, **kwargs):
+        if str(model_path) != str(MODEL_PATH):
+            return upstream_load(model_path, *args, **kwargs)
+        vm = vision_engine.load_vision_model(str(MODEL_PATH))
+        VISION['vm'] = vm
+        global SERVED_SUPPORTS_VISION
+        SERVED_SUPPORTS_VISION = True
+        return vm.model, vm.tokenizer
+
+    server.load = load_vision
+
+    def serve_single(self, request, stream):
+        if VISION['vm'] is None:
+            return original_single(self, request, stream)
+        rqueue, request, args = request
+        try:
+            vm = VISION['vm']
+            tokenizer = vm.tokenizer
+            messages = [dict(m) for m in request.messages]
+            template_messages, images = input_parts.extract_vision_messages(messages)
+            input_ids, _ = vm.build_inputs(template_messages, images)
+            prompt = [int(t) for t in input_ids.tolist()]
+
+            stop_sequences, text_sm = self._make_state_machine(
+                self.model_provider.model_key, tokenizer, args.stop_words)
+            initial_state = 'normal'
+            if getattr(tokenizer, 'has_thinking', False):
+                if tokenizer.rfind_think_start(prompt) > tokenizer.rfind_think_end(prompt):
+                    initial_state = 'reasoning'
+            ctx = server.GenerationContext(
+                has_thinking=tokenizer.has_thinking,
+                has_tool_calling=tokenizer.has_tool_calling,
+                tool_parser=tokenizer.tool_parser,
+                text_sm=text_sm,
+                initial_state=initial_state,
+                prompt=prompt,
+            )
+            rqueue.put(ctx)
+            if args.seed is not None:
+                mx.random.seed(args.seed)
+            sampler = server._make_sampler(args, tokenizer)
+            stop_matcher = stop_sequences.matcher()
+            eos_ids = set(vm._eos_ids())
+            detokenizer = tokenizer.detokenizer
+            detokenizer.reset()
+            emitted, finish, token = 0, 'length', None
+            for token in vm.generate_tokens(
+                    template_messages, images, max_tokens=args.max_tokens, sampler=sampler):
+                if token in eos_ids:
+                    finish = 'stop'
+                    break
+                if stop_matcher.advance(token) or ctx._should_stop:
+                    finish = 'stop'
+                    break
+                emitted += 1
+                detokenizer.add_token(token)
+                whole = detokenizer.last_segment
+                rqueue.put(server.Response(whole, token, 0.0, None, None))
+            detokenizer.finalize()
+            tail = detokenizer.last_segment
+            if tail or finish != 'length':
+                rqueue.put(server.Response(tail, token, 0.0, finish, None))
+            rqueue.put(None)
         except Exception as exc:
             rqueue.put(exc)
 
@@ -533,7 +620,11 @@ if __name__ == '__main__':
         logging.info('model ready: %s', MODEL_ALIAS)
 
     server.ModelProvider.load_default = load_then_serve
-    if OPTIONS.mtp_draft is not None:
+    if PROFILE['alias'] in VISION_PROFILES:
+        if OPTIONS.decode_concurrency > 1 or OPTIONS.prompt_concurrency > 1:
+            raise SystemExit('Vision serving is single-request; drop the concurrency flags.')
+        install_vision()
+    elif OPTIONS.mtp_draft is not None:
         if OPTIONS.decode_concurrency > 1 or OPTIONS.prompt_concurrency > 1:
             raise SystemExit('MTP drafting is single-request; drop the concurrency flags.')
         install_mtp(Path(OPTIONS.mtp_draft))

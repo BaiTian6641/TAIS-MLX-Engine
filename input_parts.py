@@ -121,3 +121,31 @@ def normalize_message_content(messages: List[Dict[str, Any]]) -> Tuple[List[Dict
         else:
             out.append(message)
     return out, images
+
+
+def extract_vision_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List["Image.Image"]]:
+    """Return ``(messages, images)`` ready for a vision chat template.
+
+    Unlike :func:`normalize_message_content` (which flattens images to a text
+    placeholder for a text-only model), this keeps each image as the
+    ``{"type": "image"}`` part the template expands into soft tokens, and
+    decodes the images in encounter order. Text, tool and other consumable
+    parts are flattened to ``{"type": "text"}`` parts.
+    """
+    images: List["Image.Image"] = []
+    out: List[Dict[str, Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            parts: List[Dict[str, Any]] = []
+            for part in content:
+                kind = part.get("type")
+                if kind in ("image_url", "image", "input_image"):
+                    images.append(decode_image(part.get("image_url") or part.get("image") or part.get("url") or part))
+                    parts.append({"type": "image"})
+                else:
+                    parts.append({"type": "text", "text": _part_text(part, images)})
+            out.append({**message, "content": parts})
+        else:
+            out.append(message if content is not None else {**message, "content": ""})
+    return out, images

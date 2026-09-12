@@ -46,8 +46,9 @@ loader registration in `flash_models.register` injects those classes for
 sh start.sh --model gemma4-26b-a4b
 ```
 
-The vision and audio towers are never loaded, so the profile is a text server
-like the others. Multimodal input is out of scope.
+The text server loads only the language model; the vision and audio towers are
+stripped. Images are served separately through the full VLM — see **Vision**
+below.
 
 KV stays **unquantized** for this family. The pinned runtime cannot quantize a
 sliding-window cache (`RotatingKVCache.to_quantized` raises "Quantization NYI"),
@@ -68,6 +69,42 @@ Measured on this machine:
 That makes Gemma 4 the fastest profile in this engine, ahead of Qwen3.6-35B-A3B
 (169.5 tok/s) — the MoE spine with mostly sliding-window attention and only five
 growing KV layers is cheap on every axis.
+
+## Vision
+
+`gemma4-26b-a4b` and `gemma4-31b` also serve images. `serve.py` routes these
+profiles through `install_vision()`: the checkpoint loads as a complete VLM via
+`vision_engine.load_vision_model` (the vendored `flash_vlm` Gemma 4 — text
+*and* vision tower), and a request carrying image parts runs through the VLM
+instead of the text-only path. It stays single-request, because a prefill that
+needs pixel values cannot go through the batch generator.
+
+The pieces:
+
+- **`vision_engine.py`** — loads the VLM and generates. The loader reproduces
+  `mlx_lm`'s mixed-precision quantization: a per-path override in the
+  checkpoint's `quantization` map wins (the MoE routers are 8-bit here), else a
+  module is quantized iff the checkpoint carries `<path>.scales` for it — so
+  the bf16 vision tower is left alone automatically.
+- **`input_parts.extract_vision_messages`** — normalises an agentic content
+  list into template-ready parts: text/tool parts flatten to text, each image
+  part stays an `{"type": "image"}` marker, and the images are decoded (base64
+  data URL, raw base64, or `http(s)` URL) in encounter order.
+- **`VisionModel.build_inputs`** — applies the chat template (image markers
+  become `<|image|>`), preprocesses the images to `pixel_values`, then expands
+  every `<|image|>` into `{boi}{<|image|> x n}{eoi}` with `n` = that image's
+  soft-token count, before tokenizing. The VLM scatters the vision features at
+  those `<|image|>` positions in the embedding.
+
+Verified end to end over HTTP (`check_vision.py`): colour identification, OCR,
+and object counting all answer correctly on both profiles, and a text-only
+request through the same server is unchanged. The thinking channel is split
+into `reasoning`/`content` like every other profile. `gemma4-31b` is verified
+in-process only (same code path; not re-measured over HTTP).
+
+```sh
+.venv/bin/python check_vision.py --model gemma4-26b-a4b
+```
 
 ## DiffusionGemma
 

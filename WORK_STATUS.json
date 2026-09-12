@@ -1,5 +1,5 @@
 {
-  "saved_at": "2026-09-10T15:10:00.000000+00:00",
+  "saved_at": "2026-09-12T18:53:05",
   "downloads": "Both Unsloth UD-IQ1_S GGUFs complete (144.4 GiB) under gguf/, pinned by model-configs/*.gguf.lock.json. MLX 4-bit partials retained but superseded for the two Flash profiles.",
   "servers": "Stopped; ports 8080, 8081 and 8082 verified unused.",
   "implemented": [
@@ -13,7 +13,8 @@
     "Gemma 4 text profile (26B-A4B) served through the pinned mlx_lm gemma4_text implementation",
     "GGUF-vs-MLX tensor parity checker (check_gguf_parity.py)",
     "Context-scaling probe measuring prefill and decode against prompt length",
-    "Tracked reference bibliography of the optimization methods used or evaluated (docs/references.md)"
+    "Tracked reference bibliography of the optimization methods used or evaluated (docs/references.md)",
+    "Vision serving for multimodal profiles: vision_engine.py loads the full VLM (text + vision tower) from the vendored flash_vlm Gemma 4 with mlx_lm mixed-precision quantization, input_parts.extract_vision_messages decodes image_url parts (base64/data-URL/http) to PIL images, and serve.py install_vision() routes gemma4-26b-a4b and gemma4-31b single-request through the VLM"
   ],
   "validated": [
     "68 regression tests pass; every profile resolves (18 with weights on disk)",
@@ -23,7 +24,8 @@
     "context extension is verified per profile by serving a request afterwards: minicpm5/smollm3/llama/gpt-oss to 262,144, glm-4.7-flash to 405,504, nemotron to 524,288; Qwen3.5-family, Muse Glimmer and Gemma 4 hang and are restored",
     "Spark2.5 runs from a vendored port of its own modelling code: 55.3 tok/s, 1,048,576 native context, pinned by a test that requires incremental decoding to equal one full forward",
     "the architecture audit found Muse Glimmer matching, MiniCPM5 and GPT-OSS matching apart from YaRN's ignored truncate flag, and GLM-4.7-Flash differing in MLA norm epsilon and router precision",
-    "an adversarial review's four MTP defects (per-token decoding, unfiltered end-of-turn token, cache keyed by emitted rather than covered tokens, unflushed normaliser) are fixed and verified"
+    "an adversarial review's four MTP defects (per-token decoding, unfiltered end-of-turn token, cache keyed by emitted rather than covered tokens, unflushed normaliser) are fixed and verified",
+    "vision end-to-end: colour, OCR, and counting answered correctly on gemma4-26b-a4b (over HTTP, streaming and not, plus text-only unchanged) and on gemma4-31b (in-process); test_vision.py 6 tests OK; check_vision.py writes gemma4-26b-a4b-vision-check.json (3/3)"
   ],
   "pending": [
     "the two Flash profiles need their weights downloaded before they can serve",
