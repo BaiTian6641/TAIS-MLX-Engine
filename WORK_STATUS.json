@@ -1,5 +1,5 @@
 {
-  "saved_at": "2026-09-13T01:58:05",
+  "saved_at": "2026-09-13T12:02:22",
   "downloads": "Both Unsloth UD-IQ1_S GGUFs complete (144.4 GiB) under gguf/, pinned by model-configs/*.gguf.lock.json. MLX 4-bit partials retained but superseded for the two Flash profiles.",
   "servers": "Stopped; ports 8080, 8081 and 8082 verified unused.",
   "implemented": [
@@ -16,7 +16,8 @@
     "Tracked reference bibliography of the optimization methods used or evaluated (docs/references.md)",
     "Vision serving for multimodal profiles: vision_engine.py loads the full VLM (text + vision tower) from the vendored flash_vlm Gemma 4 with mlx_lm mixed-precision quantization, input_parts.extract_vision_messages decodes image_url parts (base64/data-URL/http) to PIL images, and serve.py install_vision() routes gemma4-26b-a4b and gemma4-31b single-request through the VLM",
     "Vision for the qwen3_5 family: vision_engine is family-aware (gemma4 and qwen3_5), loading the vendored flash_vlm Qwen3-VL VLM (pixel_values + image_grid_thw) and expanding each <|image_pad|> to prod(grid_thw)/merge_size**2 tokens; qwen3.8-27b serves images",
-    "Vision path renders agentic requests like the text path: request tools and profile chat_template_args are passed to the chat template, and function.arguments is normalised from the OpenAI wire format JSON string to a mapping (Qwen template iterates tool_call.arguments|items, which raised \"Can only get item pairs from a mapping\")"
+    "Vision path renders agentic requests like the text path: request tools and profile chat_template_args are passed to the chat template, and function.arguments is normalised from the OpenAI wire format JSON string to a mapping (Qwen template iterates tool_call.arguments|items, which raised \"Can only get item pairs from a mapping\")",
+    "The vision serve path completes the telemetry lifecycle (preparing -> token -> finish) instead of replacing the instrumented _serve_single and leaving requests stuck queued with 0 tok/s"
   ],
   "validated": [
     "68 regression tests pass; every profile resolves (18 with weights on disk)",
@@ -29,7 +30,8 @@
     "an adversarial review's four MTP defects (per-token decoding, unfiltered end-of-turn token, cache keyed by emitted rather than covered tokens, unflushed normaliser) are fixed and verified",
     "vision end-to-end: colour, OCR, and counting answered correctly on gemma4-26b-a4b (over HTTP, streaming and not, plus text-only unchanged) and on gemma4-31b (in-process); test_vision.py 6 tests OK; check_vision.py writes gemma4-26b-a4b-vision-check.json (3/3)",
     "qwen3.8-27b vision end-to-end over HTTP on port 8080 (colour, OCR, counting, streaming, text-only unchanged; check_vision.py 3/3, qwen3.8-27b-vision-check.json)",
-    "the tool_calls 404 is fixed and verified over HTTP: tool history (string arguments) answers, a declared tool yields a proper tool_call with finish_reason tool_calls, and a combined image + tool-history + tools request answers; test_vision.py 12 tests OK, suite 119 OK"
+    "the tool_calls 404 is fixed and verified over HTTP: tool history (string arguments) answers, a declared tool yields a proper tool_call with finish_reason tool_calls, and a combined image + tool-history + tools request answers; test_vision.py 12 tests OK, suite 119 OK",
+    "telemetry on the vision profile verified live: tokens_per_second 11.2-11.4 and no stuck request rows after text and image requests"
   ],
   "pending": [
     "the two Flash profiles need their weights downloaded before they can serve",

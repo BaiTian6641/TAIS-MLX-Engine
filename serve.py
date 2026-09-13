@@ -339,6 +339,10 @@ def install_vision():
     import input_parts
     import vision_engine
     upstream_load = server.load
+    # The module already wrapped _serve_single for telemetry; keep that as the
+    # fallback and reproduce its request lifecycle below, because this override
+    # replaces it rather than composing with it.
+    telemetry_single = server.ResponseGenerator._serve_single
 
     def load_vision(model_path, *args, **kwargs):
         if str(model_path) != str(MODEL_PATH):
@@ -353,8 +357,12 @@ def install_vision():
 
     def serve_single(self, request, stream):
         if VISION['vm'] is None:
-            return original_single(self, request, stream)
+            return telemetry_single(self, request, stream)
         rqueue, request, args = request
+        key = getattr(request, '_monitor_id', None)
+        if key is not None:
+            METRICS.update(key, phase='preparing', started=time.time())
+        error = False
         try:
             vm = VISION['vm']
             tokenizer = vm.tokenizer
@@ -403,6 +411,8 @@ def install_vision():
                 emitted += 1
                 detokenizer.add_token(token)
                 whole = detokenizer.last_segment
+                if key is not None:
+                    METRICS.token(key)
                 rqueue.put(server.Response(whole, token, 0.0, None, None))
             detokenizer.finalize()
             tail = detokenizer.last_segment
@@ -410,7 +420,12 @@ def install_vision():
                 rqueue.put(server.Response(tail, token, 0.0, finish, None))
             rqueue.put(None)
         except Exception as exc:
+            error = True
             rqueue.put(exc)
+        finally:
+            mx.clear_cache()
+            if key is not None:
+                METRICS.finish(key, error)
 
     server.ResponseGenerator._serve_single = serve_single
 
