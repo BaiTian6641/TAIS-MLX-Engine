@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
@@ -123,6 +124,30 @@ def normalize_message_content(messages: List[Dict[str, Any]]) -> Tuple[List[Dict
     return out, images
 
 
+def normalize_tool_call_arguments(message: Dict[str, Any]) -> Dict[str, Any]:
+    """Make a message's ``tool_calls`` arguments mappings, in place.
+
+    OpenAI's wire format carries ``function.arguments`` as a JSON *string*, but
+    chat templates iterate it as a mapping (``tool_call.arguments|items`` in the
+    Qwen template), which raises "Can only get item pairs from a mapping" on a
+    string. A missing key is fine (the filter skips ``Undefined``); ``null`` has
+    to become ``{}``.
+    """
+    for tool_call in message.get("tool_calls") or []:
+        func = tool_call.get("function") if isinstance(tool_call, dict) else None
+        if not func:
+            continue
+        args = func.get("arguments")
+        if isinstance(args, str):
+            try:
+                func["arguments"] = json.loads(args)
+            except json.JSONDecodeError:
+                func["arguments"] = {"value": args}
+        elif args is None and "arguments" in func:
+            func["arguments"] = {}
+    return message
+
+
 def extract_vision_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List["Image.Image"]]:
     """Return ``(messages, images)`` ready for a vision chat template.
 
@@ -145,7 +170,8 @@ def extract_vision_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[s
                     parts.append({"type": "image"})
                 else:
                     parts.append({"type": "text", "text": _part_text(part, images)})
-            out.append({**message, "content": parts})
-        else:
-            out.append(message if content is not None else {**message, "content": ""})
+            message = {**message, "content": parts}
+        elif content is None:
+            message = {**message, "content": ""}
+        out.append(normalize_tool_call_arguments(message))
     return out, images

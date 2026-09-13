@@ -17,9 +17,11 @@ from input_parts import (
     decode_image,
     extract_vision_messages,
     normalize_message_content,
+    normalize_tool_call_arguments,
 )
 
 GEMMA = Path(__file__).parent / "models" / "gemma4-26b-a4b"
+QWEN = Path(__file__).parent / "models" / "qwen3.8-27b"
 
 
 def _png_b64(color=(200, 0, 0), size=(32, 32)):
@@ -123,6 +125,68 @@ class ImageTokenExpansionTest(unittest.TestCase):
         self.assertEqual(run[-1], eoi_id)
         self.assertTrue(all(t == soft for t in run[1:-1]))
         self.assertIsNotNone(pixel_values)
+
+
+@unittest.skipUnless(QWEN.is_dir(), "qwen3.8-27b checkpoint not present")
+class ToolCallRenderingTest(unittest.TestCase):
+    """A tool_calls message must render: the template iterates arguments|items."""
+
+    @classmethod
+    def setUpClass(cls):
+        from mlx_lm.utils import load_tokenizer
+
+        cls.tok = load_tokenizer(str(QWEN), tokenizer_config_extra={"trust_remote_code": True})
+        cls.tools = [{"type": "function", "function": {
+            "name": "calc", "description": "do math",
+            "parameters": {"type": "object", "properties": {"expr": {"type": "string"}}},
+        }}]
+
+    def _render(self, messages, **kwargs):
+        prepared, _ = extract_vision_messages(messages)
+        return self.tok.apply_chat_template(
+            prepared, tools=self.tools, tokenize=False,
+            add_generation_prompt=True, **kwargs)
+
+    def test_json_string_arguments_render(self):
+        # OpenAI's wire format: arguments is a JSON string, not a mapping.
+        text = self._render([
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "calc", "arguments": '{"expr": "2+2"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "4"},
+        ])
+        self.assertIn("expr", text)
+
+    def test_null_arguments_render(self):
+        text = self._render([
+            {"role": "user", "content": "Use the calculator."},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "c1", "type": "function",
+                 "function": {"name": "calc", "arguments": None}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "done"},
+        ])
+        self.assertTrue(text)
+
+
+class ToolCallArgumentTest(unittest.TestCase):
+    def test_string_becomes_mapping(self):
+        msg = {"tool_calls": [{"function": {"name": "f", "arguments": '{"a": 1}'}}]}
+        self.assertEqual(normalize_tool_call_arguments(msg)["tool_calls"][0]["function"]["arguments"], {"a": 1})
+
+    def test_null_becomes_empty_mapping(self):
+        # `|items` skips an absent key but raises on None.
+        msg = {"tool_calls": [{"function": {"name": "f", "arguments": None}}]}
+        self.assertEqual(normalize_tool_call_arguments(msg)["tool_calls"][0]["function"]["arguments"], {})
+
+    def test_missing_key_is_left_alone(self):
+        msg = {"tool_calls": [{"function": {"name": "f"}}]}
+        self.assertNotIn("arguments", normalize_tool_call_arguments(msg)["tool_calls"][0]["function"])
+
+    def test_non_json_string_is_wrapped(self):
+        msg = {"tool_calls": [{"function": {"name": "f", "arguments": "not json"}}]}
+        self.assertEqual(normalize_tool_call_arguments(msg)["tool_calls"][0]["function"]["arguments"],
+                         {"value": "not json"})
 
 
 if __name__ == "__main__":

@@ -59,16 +59,27 @@ class VisionModel:
 
     # -- input construction ------------------------------------------------
     def build_inputs(
-        self, messages: List[Dict[str, Any]], images: Sequence[Any]
+        self,
+        messages: List[Dict[str, Any]],
+        images: Sequence[Any],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        chat_template_args: Optional[Dict[str, Any]] = None,
     ) -> Tuple[mx.array, Dict[str, Any]]:
         """Return ``(input_ids, model_kwargs)`` for a chat conversation.
 
         ``model_kwargs`` carries the prefill-only inputs (``pixel_values`` and,
         for qwen, ``image_grid_thw``); it is empty for a text-only turn.
+
+        ``tools`` and ``chat_template_args`` are the same values the text path
+        hands the template, so an agentic request renders identically.
         """
         tok = self.tokenizer
         text = tok.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+            messages,
+            tools=tools,
+            tokenize=False,
+            add_generation_prompt=True,
+            **(chat_template_args or {}),
         )
         extra: Dict[str, Any] = {}
         if images:
@@ -110,16 +121,27 @@ class VisionModel:
     # -- generation ---------------------------------------------------------
     def generate_tokens(
         self,
-        messages: List[Dict[str, Any]],
+        messages: Optional[List[Dict[str, Any]]] = None,
         images: Sequence[Any] = (),
         max_tokens: int = 256,
         sampler=None,
         temperature: float = 0.0,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        chat_template_args: Optional[Dict[str, Any]] = None,
+        inputs: Optional[Tuple[mx.array, Dict[str, Any]]] = None,
     ):
-        """Yield generated token ids one at a time (stops at an eos token)."""
+        """Yield generated token ids one at a time (stops at an eos token).
+
+        ``inputs`` short-circuits input construction when the caller has
+        already built them (the serving path does, to render the context).
+        """
         from vendor.flash_vlm.models.cache import make_prompt_cache
 
-        input_ids, extra = self.build_inputs(messages, images)
+        if inputs is None:
+            inputs = self.build_inputs(
+                messages or [], images, tools=tools, chat_template_args=chat_template_args
+            )
+        input_ids, extra = inputs
         if input_ids.ndim == 1:
             input_ids = input_ids[None, :]
 
@@ -149,8 +171,13 @@ class VisionModel:
         images: Sequence[Any] = (),
         max_tokens: int = 256,
         temperature: float = 0.0,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        chat_template_args: Optional[Dict[str, Any]] = None,
     ) -> str:
-        out = list(self.generate_tokens(messages, images, max_tokens, temperature=temperature))
+        out = list(self.generate_tokens(
+            messages, images, max_tokens,
+            temperature=temperature, tools=tools, chat_template_args=chat_template_args,
+        ))
         return self.tokenizer.decode(out, skip_special_tokens=True)
 
     def _eos_ids(self) -> List[int]:

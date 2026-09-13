@@ -63,6 +63,11 @@ marker expansion) and skips the expansion test when the checkpoint is absent.
 
 ## Notes
 
+- An agentic request renders exactly as it does on the text path: the request's
+  `tools` and the profile's `chat_template_args` are passed to the template, and
+  `function.arguments` is normalised from the wire format's JSON string to a
+  mapping (the Qwen template iterates `tool_call.arguments|items`, which raises
+  on a string).
 - Thinking models answer after a thought block; the output-channel handling
   splits the reply so `content` holds the answer and `reasoning` the trace.
 - The image is resized by the family's own processor (aspect-ratio preserving),

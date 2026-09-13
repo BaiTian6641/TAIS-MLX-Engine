@@ -360,7 +360,13 @@ def install_vision():
             tokenizer = vm.tokenizer
             messages = [dict(m) for m in request.messages]
             template_messages, images = input_parts.extract_vision_messages(messages)
-            input_ids, _ = vm.build_inputs(template_messages, images)
+            # Same template arguments the text path uses, so tools render.
+            template_args = dict(self.model_provider.cli_args.chat_template_args or {})
+            if getattr(args, 'chat_template_kwargs', None):
+                template_args.update(args.chat_template_kwargs)
+            tools = getattr(request, 'tools', None)
+            input_ids, extra = vm.build_inputs(
+                template_messages, images, tools=tools, chat_template_args=template_args)
             prompt = [int(t) for t in input_ids.tolist()]
 
             stop_sequences, text_sm = self._make_state_machine(
@@ -387,7 +393,7 @@ def install_vision():
             detokenizer.reset()
             emitted, finish, token = 0, 'length', None
             for token in vm.generate_tokens(
-                    template_messages, images, max_tokens=args.max_tokens, sampler=sampler):
+                    max_tokens=args.max_tokens, sampler=sampler, inputs=(input_ids, extra)):
                 if token in eos_ids:
                     finish = 'stop'
                     break
@@ -411,12 +417,17 @@ def install_vision():
 
 original_process_message_content = server.process_message_content
 
-from input_parts import ContentPartError, decode_image, normalize_message_content
+from input_parts import (
+    ContentPartError,
+    decode_image,
+    normalize_message_content,
+    normalize_tool_call_arguments,
+)
 
-# Whether the served profile can consume decoded images. No profile is served
-# through a vision path yet (gemma4/qwen3.6/muse-glimmer ship vision weights,
-# but the text-only serving path strips them; wiring the vendored VLM is the
-# follow-up). Decoded images are kept on the request for when it lands.
+# Set true by install_vision() once the vision model is loaded. The text path
+# uses it to report an image part honestly on a profile that has no vision
+# loader (a vision profile never reaches process_message_content: its requests
+# are built by install_vision's serve_single).
 SERVED_SUPPORTS_VISION = False
 SERVED_PROFILE_NAME = "unknown"
 
@@ -436,14 +447,8 @@ def process_message_content(messages):
             f"served text-only; vision inference is not wired for it."
         )
     messages[:] = normalized
-
     for message in messages:
-        if tool_calls := message.get("tool_calls"):
-            for tool_call in tool_calls:
-                if func := tool_call.get("function"):
-                    if args := func.get("arguments"):
-                        if isinstance(args, str):
-                            func["arguments"] = json.loads(args)
+        normalize_tool_call_arguments(message)
 
 
 server.process_message_content = process_message_content
