@@ -1,5 +1,5 @@
 {
-  "saved_at": "2026-09-12T18:53:05",
+  "saved_at": "2026-09-13T01:10:24",
   "downloads": "Both Unsloth UD-IQ1_S GGUFs complete (144.4 GiB) under gguf/, pinned by model-configs/*.gguf.lock.json. MLX 4-bit partials retained but superseded for the two Flash profiles.",
   "servers": "Stopped; ports 8080, 8081 and 8082 verified unused.",
   "implemented": [
@@ -14,7 +14,8 @@
     "GGUF-vs-MLX tensor parity checker (check_gguf_parity.py)",
     "Context-scaling probe measuring prefill and decode against prompt length",
     "Tracked reference bibliography of the optimization methods used or evaluated (docs/references.md)",
-    "Vision serving for multimodal profiles: vision_engine.py loads the full VLM (text + vision tower) from the vendored flash_vlm Gemma 4 with mlx_lm mixed-precision quantization, input_parts.extract_vision_messages decodes image_url parts (base64/data-URL/http) to PIL images, and serve.py install_vision() routes gemma4-26b-a4b and gemma4-31b single-request through the VLM"
+    "Vision serving for multimodal profiles: vision_engine.py loads the full VLM (text + vision tower) from the vendored flash_vlm Gemma 4 with mlx_lm mixed-precision quantization, input_parts.extract_vision_messages decodes image_url parts (base64/data-URL/http) to PIL images, and serve.py install_vision() routes gemma4-26b-a4b and gemma4-31b single-request through the VLM",
+    "Vision for the qwen3_5 family: vision_engine is family-aware (gemma4 and qwen3_5), loading the vendored flash_vlm Qwen3-VL VLM (pixel_values + image_grid_thw) and expanding each <|image_pad|> to prod(grid_thw)/merge_size**2 tokens; qwen3.8-27b serves images"
   ],
   "validated": [
     "68 regression tests pass; every profile resolves (18 with weights on disk)",
@@ -25,7 +26,8 @@
     "Spark2.5 runs from a vendored port of its own modelling code: 55.3 tok/s, 1,048,576 native context, pinned by a test that requires incremental decoding to equal one full forward",
     "the architecture audit found Muse Glimmer matching, MiniCPM5 and GPT-OSS matching apart from YaRN's ignored truncate flag, and GLM-4.7-Flash differing in MLA norm epsilon and router precision",
     "an adversarial review's four MTP defects (per-token decoding, unfiltered end-of-turn token, cache keyed by emitted rather than covered tokens, unflushed normaliser) are fixed and verified",
-    "vision end-to-end: colour, OCR, and counting answered correctly on gemma4-26b-a4b (over HTTP, streaming and not, plus text-only unchanged) and on gemma4-31b (in-process); test_vision.py 6 tests OK; check_vision.py writes gemma4-26b-a4b-vision-check.json (3/3)"
+    "vision end-to-end: colour, OCR, and counting answered correctly on gemma4-26b-a4b (over HTTP, streaming and not, plus text-only unchanged) and on gemma4-31b (in-process); test_vision.py 6 tests OK; check_vision.py writes gemma4-26b-a4b-vision-check.json (3/3)",
+    "qwen3.8-27b vision end-to-end over HTTP on port 8080 (colour, OCR, counting, streaming, text-only unchanged; check_vision.py 3/3, qwen3.8-27b-vision-check.json)"
   ],
   "pending": [
     "the two Flash profiles need their weights downloaded before they can serve",

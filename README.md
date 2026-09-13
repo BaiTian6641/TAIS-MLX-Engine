@@ -55,8 +55,8 @@ behaviour and the evidence for it.
   reasoning in `reasoning`, rather than as raw template markers.
 - **Vision** — multimodal profiles serve images over the same OpenAI endpoint:
   `image_url` parts (base64 data URL, raw base64, or `http(s)`) are decoded and
-  run through the checkpoint's vision tower. Verified on `gemma4-26b-a4b` and
-  `gemma4-31b` (colour, OCR, counting); see `docs/gemma4.md`.
+  run through the checkpoint's vision tower. Two families are wired
+  (`gemma4-26b-a4b`, `gemma4-31b`, `qwen3.8-27b`); see `docs/vision.md`.
 
 ## Profiles
 
