@@ -61,6 +61,20 @@ Each run writes `<profile>-vision-check.json` with the answers and timings.
 `test_vision.py` covers the model-free logic (decoding, content normalisation,
 marker expansion) and skips the expansion test when the checkpoint is absent.
 
+## Robustness
+
+- **Archived frames** — long agentic sessions resend old screenshots in
+  history. `--vision-max-images N` (default 4) keeps only the N most recent
+  images and replaces older ones with a short note in the prompt, which bounds
+  the prefill without losing the frames that still matter.
+- **Empty answers** — Qwen3.8 sometimes thinks past the token budget without
+  ever emitting `</think>`, or closes `</think>` and ends the turn with nothing
+  after it; either way the client would see an empty reply. The endpoint
+  detects both shapes and retries once greedily (`--vision-empty-stop-retries`,
+  default 1), which reliably produces the answer.
+- **Bad images** — an image part that cannot be decoded is a 400 naming the
+  problem, not a 404.
+
 ## Notes
 
 - An agentic request renders exactly as it does on the text path: the request's

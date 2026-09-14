@@ -148,7 +148,7 @@ def normalize_tool_call_arguments(message: Dict[str, Any]) -> Dict[str, Any]:
     return message
 
 
-def extract_vision_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List["Image.Image"]]:
+def extract_vision_messages(messages: List[Dict[str, Any]], max_images: Optional[int] = None) -> Tuple[List[Dict[str, Any]], List["Image.Image"]]:
     """Return ``(messages, images)`` ready for a vision chat template.
 
     Unlike :func:`normalize_message_content` (which flattens images to a text
@@ -156,16 +156,39 @@ def extract_vision_messages(messages: List[Dict[str, Any]]) -> Tuple[List[Dict[s
     ``{"type": "image"}`` part the template expands into soft tokens, and
     decodes the images in encounter order. Text, tool and other consumable
     parts are flattened to ``{"type": "text"}`` parts.
+
+    ``max_images`` keeps only the most recent N images: long agentic sessions
+    resend archived screenshots in history, and beyond a handful they dominate
+    the prefill while telling the model little it still needs. Older image
+    parts become a short note in the prompt instead.
     """
+    image_parts = 0
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        image_parts += sum(
+            1 for part in content
+            if isinstance(part, dict) and part.get("type") in ("image_url", "image", "input_image"))
+    omitted = 0
+    if max_images is not None and max_images >= 0 and image_parts > max_images:
+        omitted = image_parts - max_images
+
     images: List["Image.Image"] = []
     out: List[Dict[str, Any]] = []
+    seen = 0
     for message in messages:
         content = message.get("content")
         if isinstance(content, list):
             parts: List[Dict[str, Any]] = []
             for part in content:
-                kind = part.get("type")
+                kind = part.get("type") if isinstance(part, dict) else None
                 if kind in ("image_url", "image", "input_image"):
+                    if seen < omitted:
+                        seen += 1
+                        parts.append({"type": "text", "text": "[earlier image removed from context]"})
+                        continue
+                    seen += 1
                     images.append(decode_image(part.get("image_url") or part.get("image") or part.get("url") or part))
                     parts.append({"type": "image"})
                 else:

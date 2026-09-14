@@ -149,10 +149,13 @@ class VisionModel:
         eos = set(self._eos_ids())
 
         def pick(logits):
+            # One token, shape (1,): the samplers disagree on whether they
+            # keep the batch dim, and the decode step below adds its own.
             if sampler is not None:
                 t = sampler(logits)
-                return t if getattr(t, "ndim", 0) > 0 else t[None]
-            return _sample(logits, temperature)
+            else:
+                t = _sample(logits, temperature)
+            return mx.reshape(t, (1,))
 
         logits = self.model(input_ids, cache=cache, **extra)
         next_id = pick(_logits_of(logits)[:, -1, :])

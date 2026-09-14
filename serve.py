@@ -366,9 +366,13 @@ def install_vision():
         try:
             vm = VISION['vm']
             tokenizer = vm.tokenizer
-            messages = [dict(m) for m in request.messages]
-            template_messages, images = input_parts.extract_vision_messages(messages)
-            # Same template arguments the text path uses, so tools render.
+            # handle_completion already validated and decoded the parts.
+            prepared = getattr(request, '_vision_prepared', None)
+            if prepared is None:
+                prepared = input_parts.extract_vision_messages(
+                    [dict(m) for m in request.messages],
+                    max_images=getattr(OPTIONS, 'vision_max_images', None))
+            template_messages, images = prepared
             template_args = dict(self.model_provider.cli_args.chat_template_args or {})
             if getattr(args, 'chat_template_kwargs', None):
                 template_args.update(args.chat_template_kwargs)
@@ -395,26 +399,59 @@ def install_vision():
             if args.seed is not None:
                 mx.random.seed(args.seed)
             sampler = server._make_sampler(args, tokenizer)
-            stop_matcher = stop_sequences.matcher()
             eos_ids = set(vm._eos_ids())
-            detokenizer = tokenizer.detokenizer
-            detokenizer.reset()
-            emitted, finish, token = 0, 'length', None
-            for token in vm.generate_tokens(
-                    max_tokens=args.max_tokens, sampler=sampler, inputs=(input_ids, extra)):
-                if token in eos_ids:
-                    finish = 'stop'
+
+            think_open = tokenizer.convert_tokens_to_ids('<think>')
+            think_close = tokenizer.convert_tokens_to_ids('</think>')
+            expects_think = bool(think_open) and think_open in input_ids.tolist()
+
+            def empty_stop(ids):
+                """True when the turn produced no final answer.
+
+                Two failure shapes, both seen on this model: the thought
+                rambles until the token budget ends without ever emitting
+                ``</think>`` (finish=length), or it closes ``</think>`` and
+                ends the turn immediately with nothing after it (finish=stop).
+                Either way the client gets an empty reply.
+                """
+                if not expects_think:
+                    return not ids
+                cut = None
+                for i, t in enumerate(ids):
+                    if t == think_close:
+                        cut = i
+                if cut is None:
+                    return True
+                return not tokenizer.decode(ids[cut + 1:], skip_special_tokens=True).strip()
+
+            attempts = 1 + max(0, getattr(OPTIONS, 'vision_empty_stop_retries', 0))
+            generated, finish, token = [], 'length', None
+            for attempt in range(attempts):
+                stop_matcher = stop_sequences.matcher()
+                detokenizer = tokenizer.detokenizer
+                detokenizer.reset()
+                retry_sampler = sampler if attempt == 0 else None  # retries decode greedily
+                generated, finish, token = [], 'length', None
+                for token in vm.generate_tokens(
+                        max_tokens=args.max_tokens, sampler=retry_sampler,
+                        inputs=(input_ids, extra)):
+                    if token in eos_ids:
+                        finish = 'stop'
+                        break
+                    if stop_matcher.advance(token) or ctx._should_stop:
+                        finish = 'stop'
+                        break
+                    generated.append(token)
+                    detokenizer.add_token(token)
+                    whole = detokenizer.last_segment
+                    if key is not None:
+                        METRICS.token(key)
+                    rqueue.put(server.Response(whole, token, 0.0, None, None))
+                detokenizer.finalize()
+                if not empty_stop(generated) or ctx._should_stop:
                     break
-                if stop_matcher.advance(token) or ctx._should_stop:
-                    finish = 'stop'
-                    break
-                emitted += 1
-                detokenizer.add_token(token)
-                whole = detokenizer.last_segment
-                if key is not None:
-                    METRICS.token(key)
-                rqueue.put(server.Response(whole, token, 0.0, None, None))
-            detokenizer.finalize()
+                logging.info('vision: empty answer (finish=%s); retrying greedily (%d/%d)',
+                             finish, attempt + 1, attempts - 1)
             tail = detokenizer.last_segment
             if tail or finish != 'length':
                 rqueue.put(server.Response(tail, token, 0.0, finish, None))
@@ -426,12 +463,9 @@ def install_vision():
             mx.clear_cache()
             if key is not None:
                 METRICS.finish(key, error)
-
     server.ResponseGenerator._serve_single = serve_single
 
-
-original_process_message_content = server.process_message_content
-
+import input_parts
 from input_parts import (
     ContentPartError,
     decode_image,
@@ -483,6 +517,32 @@ def handle_completion(self, request, stop_words):
     import logging
     logging.info('handle_completion entered: budget=%r messages=%r',
                  budget, type(getattr(request, 'messages', None)).__name__ if hasattr(request, 'messages') else 'absent')
+    if getattr(request, 'messages', None):
+        # Validate the content parts at the door: a part the model cannot
+        # consume is a bad request (400), but the pinned handler converts any
+        # error raised past this point into a 404, which reads as "wrong URL".
+        # A vision profile also gets its images decoded once, here, and the
+        # generation path reuses the stash instead of decoding again.
+        try:
+            if VISION['vm'] is not None:
+                request._vision_prepared = input_parts.extract_vision_messages(
+                    [dict(m) for m in request.messages],
+                    max_images=getattr(OPTIONS, 'vision_max_images', None))
+            else:
+                _, images = normalize_message_content([dict(m) for m in request.messages])
+                if images:
+                    raise ContentPartError(
+                        f"Image content was provided, but profile '{SERVED_PROFILE_NAME}' "
+                        f"is served text-only; vision inference is not wired for it.")
+        except ContentPartError as exc:
+            body = json.dumps({'error': {'message': str(exc), 'type': 'invalid_request_error',
+                                         'param': None, 'code': None}}).encode()
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
     if budget is not None and getattr(request, 'messages', None):
         import thinking_history
         before = thinking_history.estimate_saved(request.messages, budget)
@@ -491,7 +551,20 @@ def handle_completion(self, request, stop_words):
             logging.info('thinking history: pruning ~%d chars of older reasoning (budget %s)',
                          before, budget)
         request.messages = thinking_history.prune(request.messages, budget)
-    return original_handle_completion(self, request, stop_words)
+    try:
+        return original_handle_completion(self, request, stop_words)
+    except ContentPartError as exc:
+        # A part the model cannot consume (an undecodable image, an unknown
+        # modality) is a bad request, not a route miss: the pinned handler
+        # turns any ValueError into a 404, which reads as "wrong URL" to a
+        # client that only sent a malformed body.
+        body = json.dumps({'error': {'message': str(exc), 'type': 'invalid_request_error',
+                                     'param': None, 'code': None}}).encode()
+        self.send_response(400)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 server.APIHandler.handle_completion = handle_completion
@@ -607,7 +680,15 @@ if __name__ == '__main__':
         '--prompt-cache-size', str(OPTIONS.prompt_cache_size),
         '--decode-concurrency', str(OPTIONS.decode_concurrency),
         '--prompt-concurrency', str(OPTIONS.prompt_concurrency),
-        '--max-tokens', '32768', '--temp', '1.0', '--top-p', '0.95',
+        '--max-tokens', '32768',
+        # A client that sends its own sampling wins; this is the default for
+        # the ones that omit it. Thinking models ramble at temperature 1.0 -
+        # they exhaust the token budget inside <think> and the client gets an
+        # empty reply - so a profile may pin the vendor-recommended sampling.
+        '--temp', str(PROFILE.get('sampling', {}).get('temp', 1.0)),
+        '--top-p', str(PROFILE.get('sampling', {}).get('top_p', 0.95)),
+        *( ['--top-k', str(PROFILE['sampling']['top_k'])]
+           if PROFILE.get('sampling', {}).get('top_k') else []),
         '--chat-template-args', json.dumps(PROFILE['chat_template_args']),
     ]
     # llama.cpp-shaped clients probe /health and read /props before they will

@@ -16,14 +16,14 @@ PROFILES = {
                        'chat_template_args': {}},
     'gemma4-31b': {'path': 'models/gemma4-31b', 'model_type': 'gemma4',
                    'chat_template_args': {}},
-    'qwen3.8-27b': {'path': 'models/qwen3.8-27b', 'model_type': 'qwen3_5',
-                    'chat_template_args': {'enable_thinking': True}},
     'qwen3.6-35b-a3b': {'path': 'models/qwen3.6-35b-a3b', 'model_type': 'qwen3_5_moe',
                         'chat_template_args': {'enable_thinking': True},
                         'drafter': 'models/qwen3.6-mtp'},
     'ornith-1.5-35b-a3b': {'path': 'models/ornith-1.5-35b-a3b', 'model_type': 'qwen3_5_moe',
-                           'chat_template_args': {'enable_thinking': True},
-                           'drafter': 'models/qwen3.6-mtp'},
+                           'chat_template_args': {'enable_thinking': True}},
+    'qwen3.8-27b': {'path': 'models/qwen3.8-27b', 'model_type': 'qwen3_5',
+                    'chat_template_args': {'enable_thinking': True},
+                    'sampling': {'temp': 0.6, 'top_p': 0.95, 'top_k': 20}},
     'nemotron-3.5-30b-a3b': {'path': 'models/nemotron-3.5-30b-a3b', 'model_type': 'nemotron_h',
                              'chat_template_args': {}},
     'gpt-oss-20b': {'path': 'models/gpt-oss-20b', 'model_type': 'gpt_oss',
@@ -99,6 +99,13 @@ def parse_options(argv=None):
                              '(the pinned runtime cannot merge quantized caches)')
     parser.add_argument('--prompt-concurrency', type=int, default=1,
                         help='batch size for prefill')
+    parser.add_argument('--vision-max-images', type=int, default=4, metavar='N',
+                        help='keep only the N most recent images of a request; older ones '
+                             'become a note in the prompt. Long agentic sessions resend '
+                             'archived screenshots, which otherwise dominate the prefill')
+    parser.add_argument('--vision-empty-stop-retries', type=int, default=1, choices=(0, 1, 2),
+                        help='retry a reply whose final answer is empty (the model sometimes '
+                             'closes the turn right after </think>); the retry decodes greedily')
     args = parser.parse_args(argv)
     if args.expert_cache_gib is not None and not 0 <= args.expert_cache_gib < float('inf'):
         parser.error('--expert-cache-gib must be finite and nonnegative')

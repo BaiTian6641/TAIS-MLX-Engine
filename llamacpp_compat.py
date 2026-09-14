@@ -294,9 +294,13 @@ def install(server, profile, options):
                 return health(handler)
             if path == '/props':
                 return props(handler)
+            if path == '/version':
+                import mlx
+                return send_json(handler, {'major': 0, 'minor': 0,
+                                           'build': str(getattr(mlx, '__version__', '0'))})
             if path.startswith('/v1/models/'):
                 return model_by_id(handler, path[len('/v1/models/'):])
-            if path == '/v1/models':
+            if path in ('/v1/models', '/models'):
                 return models(handler)
             if path == '/slots':
                 return slots(handler)
